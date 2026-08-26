@@ -44,3 +44,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9d2f4a6c8e1b4730a5c7d9e0f1a2b3c4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Match3.GameManager
+  homeVideoCatalog: {fileID: 11400000, guid: e5f6a7b8c9d04e1f2a3b4c5d6e7f8091, type: 2}

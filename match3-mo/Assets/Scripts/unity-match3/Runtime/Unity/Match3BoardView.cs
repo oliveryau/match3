@@ -18,7 +18,11 @@ namespace Match3
         public float FailSwapDuration = 0.14f;
         public float BurstDuration = 0.22f;
         public float DropSpeed = 12f;
+        public float BottomMargin = 0.35f;
+        public float BackgroundPadding = 0.12f;
         public Sprite[] ColorSprites;
+        public Sprite BurstSprite;
+        public Sprite BoardBackground;
         public Sprite MissileH;
         public Sprite MissileV;
         public Sprite Propeller;
@@ -33,17 +37,53 @@ namespace Match3
         GridPos? _pressCell;
         Camera _camera;
         bool _busy;
+        int _placedScreenW;
+        int _placedScreenH;
+        SpriteRenderer _boardBackground;
 
         public Match3Engine Engine => _engine;
 
         void Start()
         {
             _camera = Camera.main;
+            ApplyPendingLevel();
             EnsureColorSprites();
             _engine = new Match3Engine(Width, Height);
             _engine.NewBoard(ColorCount);
-            CenterBoard();
+            PlaceBoardAtBottom();
+            EnsureBoardBackground();
             Rebuild();
+            SyncHud();
+        }
+
+        void ApplyPendingLevel()
+        {
+            if (GameManager.Instance == null || !GameManager.Instance.HasPendingMatch3Level)
+                return;
+
+            var level = GameManager.Instance.ActiveMatch3Level;
+            if (level == null)
+                return;
+
+            if (level.colorSprites != null && level.colorSprites.Length > 0)
+            {
+                ColorSprites = level.colorSprites;
+                ColorCount = level.colorSprites.Length;
+            }
+
+            if (level.missileH != null) MissileH = level.missileH;
+            if (level.missileV != null) MissileV = level.missileV;
+            if (level.propeller != null) Propeller = level.propeller;
+            if (level.powderKeg != null) PowderKeg = level.powderKeg;
+            if (level.lightBall != null) LightBall = level.lightBall;
+            if (level.obstacle != null) Obstacle = level.obstacle;
+        }
+
+        void SyncHud()
+        {
+            if (Match3ScoreUI.Instance == null)
+                return;
+            Match3ScoreUI.Instance.SetGoalSprite(ColorSprite(Match3ScoreUI.Instance.GoalColorId));
         }
 
         void OnDestroy()
@@ -59,7 +99,17 @@ namespace Match3
 
         void Update()
         {
-            if (_engine == null || _busy) return;
+            if (_engine == null) return;
+            if (Screen.width != _placedScreenW || Screen.height != _placedScreenH)
+            {
+                PlaceBoardAtBottom();
+                EnsureBoardBackground();
+            }
+            if (_busy) return;
+            if (Match3ResultUI.Instance != null && Match3ResultUI.Instance.IsShowing)
+                return;
+            if (Match3ScoreUI.Instance != null && !Match3ScoreUI.Instance.HasTurnsLeft)
+                return;
 
             if (PressedThisFrame())
             {
@@ -119,6 +169,10 @@ namespace Match3
         void TrySwapCells(GridPos a, GridPos b)
         {
             if (_busy) return;
+            if (Match3ResultUI.Instance != null && Match3ResultUI.Instance.IsShowing)
+                return;
+            if (Match3ScoreUI.Instance != null && !Match3ScoreUI.Instance.HasTurnsLeft)
+                return;
             StartCoroutine(PlaySwap(a, b));
         }
 
@@ -150,13 +204,22 @@ namespace Match3
                 yield break;
             }
 
+            if (Match3ScoreUI.Instance != null)
+                Match3ScoreUI.Instance.ConsumeTurn();
+
             if (cleared.Count > 0)
+            {
+                ReportCleared(cleared);
                 yield return BurstCells(cleared);
+            }
 
             yield return ResolveCascade();
             _engine.FinishTurn();
             RefreshSelection();
             _busy = false;
+
+            if (Match3ScoreUI.Instance != null)
+                Match3ScoreUI.Instance.TryShowResultIfFinished();
         }
 
         IEnumerator ResolveCascade()
@@ -172,8 +235,15 @@ namespace Match3
                 if (matches.Count == 0)
                     yield break;
 
+                ReportCleared(matches);
                 yield return BurstCells(matches);
             }
+        }
+
+        void ReportCleared(List<Cell> cleared)
+        {
+            if (Match3ScoreUI.Instance != null)
+                Match3ScoreUI.Instance.AddClearedCells(cleared);
         }
 
         IEnumerator SwapViews(Transform a, Transform b, float duration)
@@ -253,7 +323,7 @@ namespace Match3
                 go.transform.localPosition = localPos;
                 go.transform.localScale = Vector3.one * (CellSize * 0.28f);
                 var sr = go.AddComponent<SpriteRenderer>();
-                sr.sprite = ColorSprites != null && ColorSprites.Length > 0 ? ColorSprites[0] : null;
+                sr.sprite = BurstSprite != null ? BurstSprite : null;
                 sr.color = color;
                 sr.sortingOrder = 6;
                 float angle = (i / (float)count) * Mathf.PI * 2f + Random.Range(-0.2f, 0.2f);
@@ -483,12 +553,63 @@ namespace Match3
             return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
         }
 
-        void CenterBoard()
+        void PlaceBoardAtBottom()
         {
+            if (_camera == null) _camera = Camera.main;
+            _placedScreenW = Screen.width;
+            _placedScreenH = Screen.height;
+            if (_camera == null)
+            {
+                transform.position = new Vector3(
+                    -(Width - 1) * CellSize * 0.5f,
+                    0f,
+                    0f);
+                return;
+            }
+
+            float planeZ = 0f;
+            float distance = Mathf.Abs(_camera.transform.position.z - planeZ);
+            var screenCenter = _camera.ViewportToWorldPoint(new Vector3(0.5f, 0.5f, distance));
+            var screenBottom = _camera.ViewportToWorldPoint(new Vector3(0.5f, 0f, distance));
+
             transform.position = new Vector3(
-                -(Width - 1) * CellSize * 0.5f,
-                -(Height - 1) * CellSize * 0.5f,
+                screenCenter.x - (Width - 1) * CellSize * 0.5f,
+                screenBottom.y + BottomMargin + CellSize * 0.5f,
+                planeZ);
+            EnsureBoardBackground();
+        }
+
+        void EnsureBoardBackground()
+        {
+            if (BoardBackground == null)
+            {
+                if (_boardBackground != null)
+                    _boardBackground.enabled = false;
+                return;
+            }
+
+            if (_boardBackground == null)
+            {
+                var go = new GameObject("BoardBackground");
+                go.transform.SetParent(transform, false);
+                _boardBackground = go.AddComponent<SpriteRenderer>();
+                _boardBackground.sortingOrder = -1;
+            }
+
+            _boardBackground.enabled = true;
+            _boardBackground.sprite = BoardBackground;
+            _boardBackground.transform.localPosition = new Vector3(
+                (Width - 1) * CellSize * 0.5f,
+                (Height - 1) * CellSize * 0.5f,
                 0f);
+
+            var size = BoardBackground.bounds.size;
+            float targetW = Width * CellSize + BackgroundPadding * 2f;
+            float targetH = Height * CellSize + BackgroundPadding * 2f;
+            _boardBackground.transform.localScale = new Vector3(
+                size.x > 0.0001f ? targetW / size.x : 1f,
+                size.y > 0.0001f ? targetH / size.y : 1f,
+                1f);
         }
 
         bool TryGridAtPointer(out GridPos grid)

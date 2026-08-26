@@ -8,14 +8,12 @@ namespace Match3
     {
         private const string GameManagerPath = "Assets/Prefabs/Game Manager.prefab";
         private const string AudioManagerPath = "Assets/Prefabs/Audio Manager.prefab";
-        private const string UIManagerPath = "Assets/Prefabs/UI Manager.prefab";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void SpawnManagersIfMissing()
         {
             Spawn(GameManagerPath);
             Spawn(AudioManagerPath);
-            Spawn(UIManagerPath);
         }
 
         private static void Spawn(string path)
