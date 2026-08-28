@@ -5,6 +5,7 @@ namespace Match3
     public class ResolveResult
     {
         public readonly HashSet<GridPos> Cleared = new HashSet<GridPos>();
+        public readonly List<Cell> ClearedCells = new List<Cell>();
         public readonly List<Cell> SpawnedSpecials = new List<Cell>();
         public readonly List<Cell> Activated = new List<Cell>();
     }
@@ -56,18 +57,22 @@ namespace Match3
         public void Activate(Cell special, ResolveResult into, int colorHint)
         {
             if (special == null) return;
+            var grid = special.Grid;
+            if (!into.Cleared.Add(grid)) return;
+
             into.Activated.Add(special);
-            ClearCell(special, into, false);
-            switch (special.Special)
+            var type = special.Special;
+            special.State = CellState.Destroy;
+            into.ClearedCells.Add(special);
+            _board.Set(grid.x, grid.y, null);
+
+            switch (type)
             {
                 case SpecialType.HMissile:
-                    ClearLine(special.Grid.y, true, into);
-                    break;
                 case SpecialType.VMissile:
-                    ClearLine(special.Grid.x, false, into);
-                    break;
                 case SpecialType.PowderKeg:
-                    ClearRadius(special.Grid, 2, into);
+                    // Gold peach / keg: clear a local area around the special.
+                    ClearRadius(grid, 2, into);
                     break;
                 case SpecialType.Propeller:
                     ClearCell(PickPropellerTarget(), into, true);
@@ -82,36 +87,43 @@ namespace Match3
         {
             var a = match.Cells[0];
             var b = match.Cells.Count > 1 ? match.Cells[1] : null;
-            ClearCell(a, into, false);
-            ClearCell(b, into, false);
             var name = match.Checker != null ? match.Checker.Name : "";
             switch (name)
             {
                 case "TwoLightBall":
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     ClearAll(into);
                     break;
                 case "LightBallAndOther":
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     ApplyLightBallWith(a, b, into);
                     break;
                 case "TwoMissile":
-                    ClearLine(a.Grid.y, true, into);
-                    ClearLine(a.Grid.x, false, into);
+                    ClearSquare(Midpoint(a.Grid, b != null ? b.Grid : a.Grid), 4, into);
                     break;
                 case "TwoPowderKeg":
-                    ClearRadius(a.Grid, 4, into);
+                    ClearSquare(a.Grid, 4, into);
                     break;
                 case "TwoPropeller":
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     ClearCell(PickPropellerTarget(), into, true);
                     ClearCell(PickPropellerTarget(), into, true);
                     ClearCell(PickPropellerTarget(), into, true);
                     break;
                 case "MissileAndKeg":
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     ClearLine(a.Grid.y - 1, true, into);
                     ClearLine(a.Grid.y, true, into);
                     ClearLine(a.Grid.y + 1, true, into);
                     ClearLine(a.Grid.x, false, into);
                     break;
                 case "PropellerAndMissile":
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     var t = PickPropellerTarget();
                     if (t != null)
                     {
@@ -120,10 +132,14 @@ namespace Match3
                     }
                     break;
                 case "PropellerAndKeg":
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     var t2 = PickPropellerTarget();
                     if (t2 != null) ClearRadius(t2.Grid, 2, into);
                     break;
                 default:
+                    ClearCell(a, into, false);
+                    ClearCell(b, into, false);
                     Activate(a, into, a.ColorId);
                     if (b != null) Activate(b, into, b.ColorId);
                     break;
@@ -182,6 +198,37 @@ namespace Match3
             }
         }
 
+        /// <summary>Axis-aligned square clear (e.g. size 4 → 4x4 cells), centered on <paramref name="center"/>.</summary>
+        public void ClearSquare(GridPos center, int size, ResolveResult into)
+        {
+            if (size <= 0) return;
+            int startX = center.x - (size - 1) / 2;
+            int startY = center.y - (size - 1) / 2;
+            for (int x = startX; x < startX + size; x++)
+            for (int y = startY; y < startY + size; y++)
+            {
+                var c = _board.Get(x, y);
+                if (c == null) continue;
+                // Destroy specials in the blast without chaining their own smaller clears.
+                ForceDestroy(c, into);
+            }
+        }
+
+        public static GridPos Midpoint(GridPos a, GridPos b)
+        {
+            return new GridPos((a.x + b.x) / 2, (a.y + b.y) / 2);
+        }
+
+        void ForceDestroy(Cell cell, ResolveResult into)
+        {
+            if (cell == null) return;
+            var grid = cell.Grid;
+            if (!into.Cleared.Add(grid)) return;
+            cell.State = CellState.Destroy;
+            into.ClearedCells.Add(cell);
+            _board.Set(grid.x, grid.y, null);
+        }
+
         void ClearColor(int colorId, ResolveResult into)
         {
             var list = _board.CollectMain(c => c.IsNormal && c.ColorId == colorId);
@@ -198,6 +245,14 @@ namespace Match3
         {
             if (cell == null) return;
             var grid = cell.Grid;
+
+            // Specials detonate (and may chain) instead of a plain clear.
+            if (cell.IsSpecial && cell.Special != SpecialType.None)
+            {
+                Activate(cell, into, cell.ColorId);
+                return;
+            }
+
             if (!into.Cleared.Add(grid)) return;
 
             if (cell.IsObstacle)
@@ -217,14 +272,8 @@ namespace Match3
                 if (grass.Hp <= 0) _board.Set(grid.x, grid.y, null, GridLayer.Grass);
             }
 
-            if (cell.IsSpecial && cell.Special != SpecialType.None && cell.State != CellState.CleanUp)
-            {
-                cell.State = CellState.CleanUp;
-                Activate(cell, into, cell.ColorId);
-                return;
-            }
-
             cell.State = CellState.Destroy;
+            into.ClearedCells.Add(cell);
             _board.Set(grid.x, grid.y, null);
 
             if (hitNeighbors)

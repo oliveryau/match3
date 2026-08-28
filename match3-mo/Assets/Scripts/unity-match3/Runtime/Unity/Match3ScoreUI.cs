@@ -2,17 +2,17 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 namespace Match3
 {
     /// <summary>
-    /// Goal: clear a target number of tiles of one color (default: ColorSprites[0]).
+    /// Goal: clear a target number of tiles of one food (default: FoodSprites[0]).
     /// Fill shows progress percent. Stars unlock at 50% / 75% / 100%.
     /// </summary>
     public class Match3ScoreUI : MonoBehaviour
     {
-        static readonly Color LockedStarColor = new Color(0x42 / 255f, 0x83 / 255f, 1f, 1f);
         static readonly float[] StarThresholds = { 0.5f, 0.75f, 1f };
 
         [SerializeField] Image fillImage;
@@ -22,10 +22,11 @@ namespace Match3
         [SerializeField] Image goalIcon;
         [SerializeField] TMP_Text targetText;
         [SerializeField] TMP_Text turnsLeftText;
-        [Tooltip("How many tiles of the goal color must be matched this level.")]
+        [Tooltip("How many tiles of the goal food must be matched this level.")]
         [SerializeField] int targetMatchCount = 15;
-        [Tooltip("1-based color id. 1 = ColorSprites element 0.")]
-        [SerializeField] int goalColorId = 1;
+        [Tooltip("1-based food id. 1 = FoodSprites element 0.")]
+        [FormerlySerializedAs("goalColorId")]
+        [SerializeField] int goalFoodId = 1;
         [SerializeField] int maxTurns = 99;
         [SerializeField] float fillLerpSpeed = 2f;
         [SerializeField] float pulseSpeed = 4f;
@@ -46,7 +47,7 @@ namespace Match3
 
         public int MatchedCount => _matchedCount;
         public int TargetMatchCount => Mathf.Max(1, targetMatchCount);
-        public int GoalColorId => goalColorId;
+        public int GoalFoodId => goalFoodId;
         public int TurnsLeft => _turnsLeft;
         public bool HasTurnsLeft => _turnsLeft > 0;
         public float Progress => Mathf.Clamp01((float)_matchedCount / TargetMatchCount);
@@ -93,8 +94,8 @@ namespace Match3
                 targetMatchCount = level.targetMatchCount;
             if (level.maxTurns >= 0)
                 maxTurns = level.maxTurns;
-            if (level.goalColorId > 0)
-                goalColorId = level.goalColorId;
+            if (level.goalFoodId > 0)
+                goalFoodId = level.goalFoodId;
         }
 
         void OnDestroy()
@@ -128,7 +129,7 @@ namespace Match3
             for (int i = 0; i < cleared.Count; i++)
             {
                 var cell = cleared[i];
-                if (cell != null && cell.IsNormal && cell.ColorId == goalColorId)
+                if (cell != null && cell.IsNormal && cell.ColorId == goalFoodId)
                     gained++;
             }
 
@@ -180,7 +181,7 @@ namespace Match3
         void RefreshTargetText()
         {
             if (targetText != null)
-                targetText.text = $"结合 x{_matchedCount}/{TargetMatchCount}";
+                targetText.text = $"x{_matchedCount}/{TargetMatchCount}";
         }
 
         public void SetGoalSprite(Sprite sprite)
@@ -189,6 +190,24 @@ namespace Match3
                 return;
             goalIcon.sprite = sprite;
             goalIcon.enabled = sprite != null;
+        }
+
+        public RectTransform GoalIconRect => goalIcon != null ? goalIcon.rectTransform : null;
+
+        /// <summary>Screen-space center of the goal icon (for UI fly-to-goal FX).</summary>
+        public bool TryGetGoalScreenPoint(out Vector2 screenPoint)
+        {
+            screenPoint = default;
+            if (goalIcon == null)
+                return false;
+
+            var canvas = goalIcon.canvas;
+            Camera uiCam = null;
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                uiCam = canvas.worldCamera;
+
+            screenPoint = RectTransformUtility.WorldToScreenPoint(uiCam, goalIcon.rectTransform.position);
+            return true;
         }
 
         public bool ConsumeTurn()
@@ -229,7 +248,7 @@ namespace Match3
                 _unlocked[i] = false;
                 if (_stars[i] == null)
                     continue;
-                _stars[i].color = LockedStarColor;
+                Match3StarVisuals.SetEarned(_stars[i], false);
                 _baseScales[i] = _stars[i].rectTransform.localScale;
                 if (_baseScales[i].sqrMagnitude < 0.0001f)
                     _baseScales[i] = Vector3.one;
@@ -245,7 +264,7 @@ namespace Match3
                 return;
 
             _unlocked[index] = true;
-            _stars[index].color = Color.white;
+            Match3StarVisuals.SetEarned(_stars[index], true);
 
             if (_pulseRoutines[index] != null)
                 StopCoroutine(_pulseRoutines[index]);

@@ -41,7 +41,8 @@ namespace Match3
 
         public int ColorCount = 5;
         public PlayState State = PlayState.WaitOperate;
-        const double NewTileMatchChance = 0.1;
+        /// <summary>0 = never spawn a color that matches immediately when avoidable.</summary>
+        public double NewTileMatchChance = 0.02;
 
         readonly Random _rng = new Random();
 
@@ -76,6 +77,13 @@ namespace Match3
             State = PlayState.WaitOperate;
         }
 
+        public List<Cell> LastSpawnedSpecials { get; private set; } = new List<Cell>();
+        public GridPos? PreferredSpecialSpawn { get; set; }
+        /// <summary>Longest same-color run in the last clear (0 if peach-only / none).</summary>
+        public int LastMaxMatchRunLength { get; private set; }
+        /// <summary>True if the last clear was a player-triggered gold peach burst.</summary>
+        public bool LastWasGoldPeachBurst { get; private set; }
+
         public Cell SpawnColor(int x, int y)
         {
             int color = Board.PickColorAvoidingMatch(x, y, ColorCount, _rng, NewTileMatchChance);
@@ -89,7 +97,22 @@ namespace Match3
             if (!a.IsNeighbor(b)) return false;
 
             Board.Swap(a, b);
+            var atA = Board.Get(a);
+            var atB = Board.Get(b);
+
+            // Gold peach swapped with anything → burst (chains into other gold peaches).
+            if (IsGoldPeach(atA) || IsGoldPeach(atB))
+            {
+                var peach = IsGoldPeach(atA) ? atA : atB;
+                cleared = DetonateGoldPeach(peach);
+                State = PlayState.Playing;
+                return true;
+            }
+
+            // Prefer spawning a new gold peach where the swapped-in piece landed.
+            PreferredSpecialSpawn = b;
             cleared = FindAndClearMatches();
+            PreferredSpecialSpawn = null;
             if (cleared.Count == 0)
             {
                 Board.Swap(a, b);
@@ -98,6 +121,27 @@ namespace Match3
 
             State = PlayState.Playing;
             return true;
+        }
+
+        static bool IsGoldPeach(Cell cell)
+        {
+            return cell != null
+                   && cell.IsSpecial
+                   && (cell.Special == SpecialType.HMissile || cell.Special == SpecialType.VMissile);
+        }
+
+        List<Cell> DetonateGoldPeach(Cell peach)
+        {
+            LastSpawnedSpecials = new List<Cell>();
+            LastMaxMatchRunLength = 0;
+            LastWasGoldPeachBurst = true;
+            if (peach == null)
+                return new List<Cell>();
+
+            var resolve = new ResolveResult();
+            Specials.Activate(peach, resolve, peach.ColorId);
+            IdleAll();
+            return new List<Cell>(resolve.ClearedCells);
         }
 
         public List<Cell> DropFill(out List<Cell> spawned)
@@ -124,6 +168,7 @@ namespace Match3
 
         public List<Cell> ClearMatches()
         {
+            PreferredSpecialSpawn = null;
             return FindAndClearMatches();
         }
 
@@ -135,11 +180,124 @@ namespace Match3
 
         List<Cell> FindAndClearMatches()
         {
-            var matched = Board.FindColorMatches();
-            foreach (var cell in matched)
+            LastSpawnedSpecials = new List<Cell>();
+            LastWasGoldPeachBurst = false;
+            LastMaxMatchRunLength = 0;
+
+            var matched = new HashSet<Cell>();
+            var peachSpawns = new List<(GridPos grid, int colorId, SpecialType special)>();
+
+            CollectLineMatches(horizontal: true, matched, peachSpawns);
+            CollectLineMatches(horizontal: false, matched, peachSpawns);
+
+            if (matched.Count == 0)
+                return new List<Cell>();
+
+            // One peach per spawn cell (e.g. L-shapes that form both a row and column).
+            var spawnByGrid = new Dictionary<int, (GridPos grid, int colorId, SpecialType special)>();
+            for (int i = 0; i < peachSpawns.Count; i++)
+            {
+                var spawn = peachSpawns[i];
+                int id = Board.GetGridId(spawn.grid);
+                if (!spawnByGrid.ContainsKey(id))
+                    spawnByGrid[id] = spawn;
+            }
+
+            var cleared = new List<Cell>(matched);
+            foreach (var cell in cleared)
                 Board.Clear(cell.Grid.x, cell.Grid.y);
+
+            foreach (var kv in spawnByGrid)
+            {
+                var spawn = kv.Value;
+                if (Board.Get(spawn.grid.x, spawn.grid.y) != null)
+                    continue;
+                var special = Cell.CreateSpecial(spawn.special, spawn.colorId, spawn.grid);
+                Board.Set(spawn.grid.x, spawn.grid.y, special);
+                LastSpawnedSpecials.Add(special);
+            }
+
             IdleAll();
-            return matched;
+            return cleared;
+        }
+
+        void CollectLineMatches(
+            bool horizontal,
+            HashSet<Cell> matched,
+            List<(GridPos grid, int colorId, SpecialType special)> peachSpawns)
+        {
+            int major = horizontal ? Board.Height : Board.Width;
+            int minor = horizontal ? Board.Width : Board.Height;
+
+            for (int a = 0; a < major; a++)
+            {
+                int b = 0;
+                while (b < minor)
+                {
+                    var start = horizontal ? Board.Get(b, a) : Board.Get(a, b);
+                    if (start == null || !start.IsNormal)
+                    {
+                        b++;
+                        continue;
+                    }
+
+                    int end = b + 1;
+                    while (end < minor)
+                    {
+                        var next = horizontal ? Board.Get(end, a) : Board.Get(a, end);
+                        if (next == null || !next.IsNormal || next.ColorId != start.ColorId)
+                            break;
+                        end++;
+                    }
+
+                    int length = end - b;
+                    if (length >= 3)
+                    {
+                        if (length > LastMaxMatchRunLength)
+                            LastMaxMatchRunLength = length;
+
+                        var run = new List<Cell>(length);
+                        for (int i = b; i < end; i++)
+                        {
+                            var cell = horizontal ? Board.Get(i, a) : Board.Get(a, i);
+                            if (cell != null)
+                            {
+                                matched.Add(cell);
+                                run.Add(cell);
+                            }
+                        }
+
+                        if (length >= 4 && run.Count > 0)
+                        {
+                            var spawnCell = PickPeachSpawnCell(run);
+                            if (spawnCell != null)
+                            {
+                                peachSpawns.Add((
+                                    spawnCell.Grid,
+                                    spawnCell.ColorId,
+                                    horizontal ? SpecialType.HMissile : SpecialType.VMissile));
+                            }
+                        }
+                    }
+
+                    b = end;
+                }
+            }
+        }
+
+        Cell PickPeachSpawnCell(List<Cell> run)
+        {
+            if (PreferredSpecialSpawn.HasValue)
+            {
+                var preferred = PreferredSpecialSpawn.Value;
+                for (int i = 0; i < run.Count; i++)
+                {
+                    if (run[i].Grid.Equals(preferred))
+                        return run[i];
+                }
+            }
+
+            return run[run.Count / 2];
         }
 
         bool HasPossibleMove()
@@ -159,6 +317,11 @@ namespace Match3
 
         bool SwapWouldMatch(GridPos a, GridPos b)
         {
+            var ca = Board.Get(a);
+            var cb = Board.Get(b);
+            if (IsGoldPeach(ca) || IsGoldPeach(cb))
+                return true;
+
             Board.Swap(a, b);
             bool match = Board.FindColorMatches().Count > 0;
             Board.Swap(a, b);
@@ -169,7 +332,7 @@ namespace Match3
         {
             foreach (var cell in Board.AllMain())
             {
-                if (cell.State == CellState.Move || cell.State == CellState.Born)
+                if (cell.State == CellState.Move || cell.State == CellState.Born || cell.State == CellState.Destroy)
                     cell.State = CellState.Idle;
             }
         }

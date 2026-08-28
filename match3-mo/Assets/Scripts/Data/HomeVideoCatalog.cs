@@ -30,6 +30,8 @@ namespace Match3
         public HomeVideoPlaybackMode mode = HomeVideoPlaybackMode.Normal;
         [Tooltip("When enabled, the clip loops. Normal mode should leave this off.")]
         public bool loop = true;
+        [Tooltip("Mute this home video's audio when playing.")]
+        public bool mute = true;
         [Tooltip("For Segmented mode: each End Seconds is a pause point while the clip loops.")]
         public HomeVideoSegment[] segments;
         [Tooltip("Shown on Button - Left at the 1st, 3rd, ... pause.")]
@@ -52,6 +54,7 @@ namespace Match3
     public enum HomeVideoId
     {
         NormalDay = 0,
+        [Obsolete("Removed from catalog")]
         NormalPreppingVacation = 1,
         NormalNight = 2,
         NormalStreet = 3,
@@ -60,7 +63,8 @@ namespace Match3
         VacationStreet = 6,
         Micro1 = 7,
         Micro2 = 8,
-        Micro3 = 9
+        Micro3 = 9,
+        Micro4 = 10
     }
 
     [CreateAssetMenu(fileName = "HomeVideoCatalog", menuName = "Match3/Home Video Catalog")]

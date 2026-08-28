@@ -1,4 +1,3 @@
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -9,7 +8,10 @@ namespace Match3
         public static Match3ResultUI Instance { get; private set; }
 
         [SerializeField] GameObject resultRoot;
-        [SerializeField] TMP_Text resultText;
+        [SerializeField] Image resultImage;
+        [SerializeField] Sprite oneStarTextSprite;
+        [SerializeField] Sprite twoStarTextSprite;
+        [SerializeField] Sprite threeStarTextSprite;
         [SerializeField] Image star1;
         [SerializeField] Image star2;
         [SerializeField] Image star3;
@@ -49,13 +51,28 @@ namespace Match3
             if (GameManager.Instance != null && GameManager.Instance.HasPendingMatch3Level)
                 PlayerProgress.RecordStars(GameManager.Instance.ActiveMatch3LevelKey, earnedStars);
 
-            if (resultText != null)
-                resultText.text = Match3StarVisuals.ResultText(earnedStars);
-
+            ApplyResultImage(earnedStars);
             Match3StarVisuals.Apply(star1, star2, star3, earnedStars);
 
             if (resultRoot != null)
                 resultRoot.SetActive(true);
+        }
+
+        void ApplyResultImage(int earnedStars)
+        {
+            if (resultImage == null)
+                return;
+
+            Sprite sprite = null;
+            switch (earnedStars)
+            {
+                case 1: sprite = oneStarTextSprite; break;
+                case 2: sprite = twoStarTextSprite; break;
+                case 3: sprite = threeStarTextSprite; break;
+            }
+
+            resultImage.sprite = sprite;
+            resultImage.enabled = sprite != null;
         }
 
         public void Hide()
@@ -73,8 +90,7 @@ namespace Match3
                 return;
             }
 
-            GameManager.Instance.ClearPendingMatch3Level();
-            GameManager.Instance.LoadHome();
+            GameManager.Instance.ReturnHomeFromMatch3();
         }
     }
 }

@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
+using UnityEngine.UI;
 
 namespace Match3
 {
@@ -17,18 +19,45 @@ namespace Match3
         public float SwapDuration = 0.18f;
         public float FailSwapDuration = 0.14f;
         public float BurstDuration = 0.22f;
+        [Header("Fly To Goal (UI Overlay)")]
+        [Tooltip("How long goal-food tiles take to fly into the goal icon.")]
+        public float FlyToGoalDuration = 0.4f;
+        [Tooltip("Scale multiplier at the end of the fly (1 = no shrink, 0 = fully shrunk).")]
+        [Range(0f, 1f)]
+        public float FlyToGoalEndScale = 0.25f;
+        [Tooltip("Normalized time (0–1) when the tile starts fading out during the fly.")]
+        [Range(0f, 1f)]
+        public float FlyToGoalFadeStart = 0.55f;
+        [Tooltip("Alpha at the end of the fly (0 = fully invisible).")]
+        [Range(0f, 1f)]
+        public float FlyToGoalEndAlpha = 0f;
+        [Tooltip("Upward arc height as a multiple of one cell's on-screen size.")]
+        public float FlyToGoalArcHeight = 0.55f;
+        [Tooltip("Overlay canvas sort order; must be above Match3 UI Canvas (usually 0).")]
+        public int FlyOverlaySortOrder = 100;
         public float DropSpeed = 12f;
         public float BottomMargin = 0.35f;
-        public float BackgroundPadding = 0.12f;
-        public Sprite[] ColorSprites;
+        [Tooltip("Extra background size on left/right (world units).")]
+        public float BackgroundPaddingWidth = 0.12f;
+        [Tooltip("Extra background size on top/bottom (world units).")]
+        public float BackgroundPaddingHeight = 0.12f;
+        [Range(0f, 1f)]
+        [Tooltip("Chance a newly spawned tile is allowed to form an immediate match. 0 = avoid when possible.")]
+        public float NewTileMatchChance = 0.02f;
+        [FormerlySerializedAs("ColorSprites")]
+        public Sprite[] FoodSprites;
+        [Tooltip("Static per-cell plate behind foods. Does not move with swaps/drops.")]
+        public Sprite FoodBackground;
         public Sprite BurstSprite;
         public Sprite BoardBackground;
         public Sprite MissileH;
         public Sprite MissileV;
+        [Tooltip("Unused for now if Missile H/V are set — gold peach uses those sprites.")]
         public Sprite Propeller;
         public Sprite PowderKeg;
         public Sprite LightBall;
         public Sprite Obstacle;
+        [SerializeField] Match3LevelVideoPlayer levelVideo;
 
         Match3Engine _engine;
         readonly Dictionary<Cell, Transform> _views = new Dictionary<Cell, Transform>();
@@ -40,6 +69,9 @@ namespace Match3
         int _placedScreenW;
         int _placedScreenH;
         SpriteRenderer _boardBackground;
+        Transform _foodBgRoot;
+        RectTransform _flyOverlayRoot;
+        Canvas _flyOverlayCanvas;
 
         public Match3Engine Engine => _engine;
 
@@ -47,47 +79,76 @@ namespace Match3
         {
             _camera = Camera.main;
             ApplyPendingLevel();
-            EnsureColorSprites();
+            EnsureFoodSprites();
             _engine = new Match3Engine(Width, Height);
+            _engine.NewTileMatchChance = NewTileMatchChance;
             _engine.NewBoard(ColorCount);
             PlaceBoardAtBottom();
             EnsureBoardBackground();
+            EnsureFoodBackgrounds();
             Rebuild();
             SyncHud();
+            // Build overlay early so the first fly-to-goal isn't using an unscaled/zero-size canvas.
+            EnsureFlyOverlay();
+            Canvas.ForceUpdateCanvases();
         }
 
         void ApplyPendingLevel()
         {
             if (GameManager.Instance == null || !GameManager.Instance.HasPendingMatch3Level)
+            {
+                ConfigureLevelVideo(null);
                 return;
+            }
 
             var level = GameManager.Instance.ActiveMatch3Level;
             if (level == null)
-                return;
-
-            if (level.colorSprites != null && level.colorSprites.Length > 0)
             {
-                ColorSprites = level.colorSprites;
-                ColorCount = level.colorSprites.Length;
+                ConfigureLevelVideo(null);
+                return;
             }
 
-            if (level.missileH != null) MissileH = level.missileH;
-            if (level.missileV != null) MissileV = level.missileV;
-            if (level.propeller != null) Propeller = level.propeller;
-            if (level.powderKeg != null) PowderKeg = level.powderKeg;
-            if (level.lightBall != null) LightBall = level.lightBall;
-            if (level.obstacle != null) Obstacle = level.obstacle;
+            if (level.foodSprites != null && level.foodSprites.Length > 0)
+            {
+                FoodSprites = level.foodSprites;
+                ColorCount = level.foodSprites.Length;
+            }
+
+            if (level.boardBgSprite != null)
+                BoardBackground = level.boardBgSprite;
+
+            ConfigureLevelVideo(level);
+        }
+
+        void ConfigureLevelVideo(Match3LevelConfig level)
+        {
+            if (levelVideo == null)
+                levelVideo = Match3LevelVideoPlayer.Instance;
+            if (levelVideo != null)
+                levelVideo.Configure(level);
+        }
+
+        void NotifyLevelVideo()
+        {
+            if (levelVideo == null)
+                levelVideo = Match3LevelVideoPlayer.Instance;
+            if (levelVideo == null || _engine == null)
+                return;
+            levelVideo.NotifyClear(_engine.LastMaxMatchRunLength, _engine.LastWasGoldPeachBurst);
         }
 
         void SyncHud()
         {
             if (Match3ScoreUI.Instance == null)
                 return;
-            Match3ScoreUI.Instance.SetGoalSprite(ColorSprite(Match3ScoreUI.Instance.GoalColorId));
+            Match3ScoreUI.Instance.SetGoalSprite(FoodSprite(Match3ScoreUI.Instance.GoalFoodId));
         }
 
         void OnDestroy()
         {
+            if (_flyOverlayRoot != null)
+                Destroy(_flyOverlayRoot.gameObject);
+
             for (int i = 0; i < _runtimeSprites.Count; i++)
             {
                 if (_runtimeSprites[i] == null) continue;
@@ -209,8 +270,10 @@ namespace Match3
 
             if (cleared.Count > 0)
             {
+                NotifyLevelVideo();
                 ReportCleared(cleared);
                 yield return BurstCells(cleared);
+                SpawnSpecialViews();
             }
 
             yield return ResolveCascade();
@@ -236,8 +299,69 @@ namespace Match3
                     yield break;
 
                 ReportCleared(matches);
+                NotifyLevelVideo();
                 yield return BurstCells(matches);
+                SpawnSpecialViews();
             }
+        }
+
+        void SpawnSpecialViews()
+        {
+            if (_engine == null || _engine.LastSpawnedSpecials == null)
+                return;
+
+            for (int i = 0; i < _engine.LastSpawnedSpecials.Count; i++)
+            {
+                var cell = _engine.LastSpawnedSpecials[i];
+                if (cell == null)
+                    continue;
+
+                // Replace any leftover view on this grid, then spawn the gold peach.
+                ClearViewAtGrid(cell.Grid);
+                var view = SpawnView(cell, LocalPos(cell.Grid));
+                if (view != null)
+                    StartCoroutine(PopInSpecial(view));
+            }
+        }
+
+        void ClearViewAtGrid(GridPos grid)
+        {
+            Cell removeKey = null;
+            foreach (var kv in _views)
+            {
+                if (kv.Key != null && kv.Key.Grid.Equals(grid))
+                {
+                    removeKey = kv.Key;
+                    if (kv.Value != null)
+                        Destroy(kv.Value.gameObject);
+                    break;
+                }
+            }
+
+            if (removeKey != null)
+                _views.Remove(removeKey);
+        }
+
+        IEnumerator PopInSpecial(Transform view)
+        {
+            if (view == null)
+                yield break;
+
+            var baseScale = Vector3.one * (CellSize * 0.92f);
+            view.localScale = baseScale * 0.2f;
+            float t = 0f;
+            const float duration = 0.22f;
+            while (t < duration && view != null)
+            {
+                t += Time.deltaTime;
+                float k = Smooth(Mathf.Clamp01(t / duration));
+                float punch = 1f + 0.18f * Mathf.Sin(k * Mathf.PI);
+                view.localScale = baseScale * Mathf.Lerp(0.2f, punch, k);
+                yield return null;
+            }
+
+            if (view != null)
+                view.localScale = baseScale;
         }
 
         void ReportCleared(List<Cell> cleared)
@@ -271,23 +395,168 @@ namespace Match3
 
         IEnumerator BurstCells(List<Cell> cleared)
         {
+            int goalFoodId = Match3ScoreUI.Instance != null
+                ? Match3ScoreUI.Instance.GoalFoodId
+                : -1;
+
             var running = new List<Transform>(cleared.Count);
+            bool anyFlyToGoal = false;
+
             for (int i = 0; i < cleared.Count; i++)
             {
-                if (!_views.TryGetValue(cleared[i], out var view) || view == null)
+                var cell = cleared[i];
+                if (!_views.TryGetValue(cell, out var view) || view == null)
                     continue;
-                _views.Remove(cleared[i]);
-                running.Add(view);
-                StartCoroutine(BurstOne(view));
+                _views.Remove(cell);
+
+                bool isGoalFood = cell.IsNormal && cell.ColorId == goalFoodId;
+                if (isGoalFood)
+                {
+                    anyFlyToGoal = true;
+                    StartCoroutine(FlyToGoalUi(view));
+                }
+                else
+                {
+                    running.Add(view);
+                    StartCoroutine(BurstOne(view));
+                }
             }
 
-            yield return new WaitForSeconds(BurstDuration);
+            float wait = anyFlyToGoal
+                ? Mathf.Max(BurstDuration, FlyToGoalDuration)
+                : BurstDuration;
+            yield return new WaitForSeconds(wait);
 
             for (int i = 0; i < running.Count; i++)
             {
                 if (running[i] != null)
                     Destroy(running[i].gameObject);
             }
+        }
+
+        IEnumerator FlyToGoalUi(Transform view)
+        {
+            if (view == null)
+                yield break;
+
+            var sr = view.GetComponent<SpriteRenderer>();
+            Sprite sprite = sr != null ? sr.sprite : null;
+            Color startColor = sr != null ? sr.color : Color.white;
+            Vector3 worldPos = view.position;
+
+            // World tile is replaced by a UI overlay icon.
+            Destroy(view.gameObject);
+
+            if (sprite == null
+                || Match3ScoreUI.Instance == null
+                || !Match3ScoreUI.Instance.TryGetGoalScreenPoint(out var goalScreen)
+                || _camera == null)
+            {
+                yield break;
+            }
+
+            EnsureFlyOverlay();
+            if (_flyOverlayRoot == null)
+                yield break;
+
+            // CanvasScaler / layout must be current or ScreenPointToLocalPoint is wrong
+            // (first fly used to create the overlay mid-frame and land off-target).
+            Canvas.ForceUpdateCanvases();
+
+            Vector2 startScreen = _camera.WorldToScreenPoint(worldPos);
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _flyOverlayRoot, startScreen, null, out var startLocal)
+                || !RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _flyOverlayRoot, goalScreen, null, out var goalLocal))
+            {
+                yield break;
+            }
+
+            float cellScreen = EstimateCellScreenSize();
+            float scaleFactor = _flyOverlayCanvas != null ? Mathf.Max(0.001f, _flyOverlayCanvas.scaleFactor) : 1f;
+            float size = cellScreen / scaleFactor;
+
+            var go = new GameObject("FlyToGoal", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            var rt = go.GetComponent<RectTransform>();
+            rt.SetParent(_flyOverlayRoot, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(size, size);
+            rt.anchoredPosition = startLocal;
+            rt.localScale = Vector3.one;
+
+            var image = go.GetComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            image.color = startColor;
+
+            float t = 0f;
+            float duration = Mathf.Max(0.05f, FlyToGoalDuration);
+            float endScale = Mathf.Clamp01(FlyToGoalEndScale);
+            float fadeStart = Mathf.Clamp01(FlyToGoalFadeStart);
+            float endAlpha = Mathf.Clamp01(FlyToGoalEndAlpha);
+            float arc = (cellScreen / scaleFactor) * FlyToGoalArcHeight;
+
+            while (t < duration && rt != null)
+            {
+                t += Time.deltaTime;
+                float k = Smooth(Mathf.Clamp01(t / duration));
+                var pos = Vector2.Lerp(startLocal, goalLocal, k);
+                pos.y += Mathf.Sin(k * Mathf.PI) * arc;
+                rt.anchoredPosition = pos;
+                float scale = Mathf.Lerp(1f, endScale, k);
+                rt.localScale = new Vector3(scale, scale, 1f);
+                var c = startColor;
+                c.a = Mathf.Lerp(startColor.a, endAlpha, Mathf.SmoothStep(fadeStart, 1f, k));
+                image.color = c;
+                yield return null;
+            }
+
+            if (go != null)
+                Destroy(go);
+        }
+
+        void EnsureFlyOverlay()
+        {
+            if (_flyOverlayRoot != null)
+            {
+                if (_flyOverlayCanvas != null)
+                    _flyOverlayCanvas.sortingOrder = FlyOverlaySortOrder;
+                return;
+            }
+
+            var go = new GameObject("FlyToGoal Overlay");
+            _flyOverlayRoot = go.AddComponent<RectTransform>();
+            _flyOverlayCanvas = go.AddComponent<Canvas>();
+            _flyOverlayCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            _flyOverlayCanvas.sortingOrder = FlyOverlaySortOrder;
+            // Don't add GraphicRaycaster — FX must not block UI clicks.
+
+            var scaler = go.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1156f, 2510f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 1f;
+
+            _flyOverlayRoot.anchorMin = Vector2.zero;
+            _flyOverlayRoot.anchorMax = Vector2.one;
+            _flyOverlayRoot.offsetMin = Vector2.zero;
+            _flyOverlayRoot.offsetMax = Vector2.zero;
+            _flyOverlayRoot.pivot = new Vector2(0.5f, 0.5f);
+
+            Canvas.ForceUpdateCanvases();
+        }
+
+        float EstimateCellScreenSize()
+        {
+            if (_camera == null)
+                return 80f;
+
+            Vector3 a = _camera.WorldToScreenPoint(transform.TransformPoint(Vector3.zero));
+            Vector3 b = _camera.WorldToScreenPoint(transform.TransformPoint(new Vector3(0f, CellSize, 0f)));
+            float size = Vector3.Distance(a, b);
+            return size > 1f ? size : 80f;
         }
 
         IEnumerator BurstOne(Transform view)
@@ -446,13 +715,15 @@ namespace Match3
 
         Transform SpawnView(Cell cell, Vector3 localPos)
         {
-            var go = new GameObject($"cell_{cell.Grid.x}_{cell.Grid.y}");
+            var go = new GameObject(cell.IsSpecial
+                ? $"special_{cell.Special}_{cell.Grid.x}_{cell.Grid.y}"
+                : $"cell_{cell.Grid.x}_{cell.Grid.y}");
             go.transform.SetParent(transform, false);
             go.transform.localPosition = localPos;
             go.transform.localScale = Vector3.one * (CellSize * 0.92f);
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = SpriteOf(cell);
-            sr.sortingOrder = 1;
+            sr.sortingOrder = cell.IsSpecial ? 2 : 1;
             _views[cell] = go.transform;
             return go.transform;
         }
@@ -470,7 +741,7 @@ namespace Match3
 
         static void BumpSort(Transform view, int order)
         {
-            var sr = view.GetComponent<SpriteRenderer>();
+            var sr = view != null ? view.GetComponent<SpriteRenderer>() : null;
             if (sr != null) sr.sortingOrder = order;
         }
 
@@ -495,27 +766,37 @@ namespace Match3
 
         Sprite SpriteOf(Cell cell)
         {
-            if (cell.IsObstacle) return Obstacle != null ? Obstacle : ColorSprite(cell.ColorId);
+            if (cell.IsObstacle) return Obstacle != null ? Obstacle : FoodSprite(cell.ColorId);
             switch (cell.Special)
             {
-                case SpecialType.HMissile: return MissileH != null ? MissileH : ColorSprite(cell.ColorId);
-                case SpecialType.VMissile: return MissileV != null ? MissileV : ColorSprite(cell.ColorId);
-                case SpecialType.Propeller: return Propeller != null ? Propeller : ColorSprite(cell.ColorId);
-                case SpecialType.PowderKeg: return PowderKeg != null ? PowderKeg : ColorSprite(cell.ColorId);
-                case SpecialType.LightBall: return LightBall != null ? LightBall : ColorSprite(cell.ColorId);
+                case SpecialType.HMissile:
+                case SpecialType.VMissile:
+                    return GoldPeachSprite(cell.ColorId);
+                case SpecialType.Propeller: return Propeller != null ? Propeller : FoodSprite(cell.ColorId);
+                case SpecialType.PowderKeg: return PowderKeg != null ? PowderKeg : GoldPeachSprite(cell.ColorId);
+                case SpecialType.LightBall: return LightBall != null ? LightBall : FoodSprite(cell.ColorId);
             }
-            return ColorSprite(cell.ColorId);
+            return FoodSprite(cell.ColorId);
         }
 
-        Sprite ColorSprite(int colorId)
+        Sprite GoldPeachSprite(int foodId)
         {
-            int i = Mathf.Clamp(colorId - 1, 0, ColorSprites.Length - 1);
-            return ColorSprites[i];
+            if (MissileH != null) return MissileH;
+            if (MissileV != null) return MissileV;
+            return FoodSprite(foodId);
         }
 
-        void EnsureColorSprites()
+        Sprite FoodSprite(int foodId)
         {
-            if (ColorSprites != null && ColorSprites.Length >= ColorCount) return;
+            if (FoodSprites == null || FoodSprites.Length == 0)
+                return null;
+            int i = Mathf.Clamp(foodId - 1, 0, FoodSprites.Length - 1);
+            return FoodSprites[i];
+        }
+
+        void EnsureFoodSprites()
+        {
+            if (FoodSprites != null && FoodSprites.Length >= ColorCount) return;
 
             var colors = new[]
             {
@@ -526,12 +807,12 @@ namespace Match3
                 new Color(0.66f, 0.42f, 0.84f)
             };
 
-            ColorSprites = new Sprite[ColorCount];
+            FoodSprites = new Sprite[ColorCount];
             for (int i = 0; i < ColorCount; i++)
             {
                 var sprite = MakeSquareSprite(colors[i % colors.Length]);
                 _runtimeSprites.Add(sprite);
-                ColorSprites[i] = sprite;
+                FoodSprites[i] = sprite;
             }
         }
 
@@ -577,6 +858,7 @@ namespace Match3
                 screenBottom.y + BottomMargin + CellSize * 0.5f,
                 planeZ);
             EnsureBoardBackground();
+            EnsureFoodBackgrounds();
         }
 
         void EnsureBoardBackground()
@@ -604,12 +886,64 @@ namespace Match3
                 0f);
 
             var size = BoardBackground.bounds.size;
-            float targetW = Width * CellSize + BackgroundPadding * 2f;
-            float targetH = Height * CellSize + BackgroundPadding * 2f;
+            float targetW = Width * CellSize + BackgroundPaddingWidth * 2f;
+            float targetH = Height * CellSize + BackgroundPaddingHeight * 2f;
             _boardBackground.transform.localScale = new Vector3(
                 size.x > 0.0001f ? targetW / size.x : 1f,
                 size.y > 0.0001f ? targetH / size.y : 1f,
                 1f);
+        }
+
+        void EnsureFoodBackgrounds()
+        {
+            if (FoodBackground == null)
+            {
+                if (_foodBgRoot != null)
+                    _foodBgRoot.gameObject.SetActive(false);
+                return;
+            }
+
+            if (_foodBgRoot == null)
+            {
+                var root = new GameObject("FoodBackgrounds");
+                root.transform.SetParent(transform, false);
+                root.transform.localPosition = Vector3.zero;
+                root.transform.localRotation = Quaternion.identity;
+                root.transform.localScale = Vector3.one;
+                _foodBgRoot = root.transform;
+            }
+
+            _foodBgRoot.gameObject.SetActive(true);
+
+            int needed = Width * Height;
+            while (_foodBgRoot.childCount < needed)
+            {
+                var go = new GameObject($"FoodBg_{_foodBgRoot.childCount}");
+                go.transform.SetParent(_foodBgRoot, false);
+                var sr = go.AddComponent<SpriteRenderer>();
+                sr.sortingOrder = 0;
+            }
+
+            for (int i = 0; i < _foodBgRoot.childCount; i++)
+            {
+                var child = _foodBgRoot.GetChild(i);
+                bool active = i < needed;
+                child.gameObject.SetActive(active);
+                if (!active)
+                    continue;
+
+                int x = i % Width;
+                int y = i / Width;
+                child.localPosition = LocalPos(new GridPos(x, y));
+                child.localScale = Vector3.one * (CellSize * 0.92f);
+
+                var sr = child.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.sprite = FoodBackground;
+                    sr.sortingOrder = 0;
+                }
+            }
         }
 
         bool TryGridAtPointer(out GridPos grid)

@@ -45,3 +45,5 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Match3.GameManager
   homeVideoCatalog: {fileID: 11400000, guid: e5f6a7b8c9d04e1f2a3b4c5d6e7f8091, type: 2}
+  starSprite: {fileID: 21300000, guid: 737573cf7d0d9fd45b4a8212a9c3d96e, type: 3}
+  starEmptySprite: {fileID: 21300000, guid: 9b2ee37af4210d54593547c5ef9b7053, type: 3}

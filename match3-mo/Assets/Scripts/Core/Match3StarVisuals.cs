@@ -5,7 +5,14 @@ namespace Match3
 {
     public static class Match3StarVisuals
     {
-        public static readonly Color Locked = new Color(0x42 / 255f, 0x83 / 255f, 1f, 1f);
+        static Sprite _star;
+        static Sprite _starEmpty;
+
+        public static void SetSprites(Sprite star, Sprite starEmpty)
+        {
+            _star = star;
+            _starEmpty = starEmpty;
+        }
 
         public static void Apply(Image star1, Image star2, Image star3, int earnedStars)
         {
@@ -19,22 +26,18 @@ namespace Match3
 
             int earned = Mathf.Clamp(earnedStars, 0, 3);
             for (int i = 0; i < stars.Length; i++)
-            {
-                if (stars[i] == null)
-                    continue;
-                stars[i].color = i < earned ? Color.white : Locked;
-            }
+                SetEarned(stars[i], i < earned);
         }
 
-        public static string ResultText(int earnedStars)
+        public static void SetEarned(Image image, bool earned)
         {
-            switch (Mathf.Clamp(earnedStars, 0, 3))
-            {
-                case 1: return "一颗星";
-                case 2: return "两颗星";
-                case 3: return "三颗星";
-                default: return "零颗星";
-            }
+            if (image == null)
+                return;
+
+            image.color = Color.white;
+            Sprite sprite = earned ? _star : _starEmpty;
+            if (sprite != null)
+                image.sprite = sprite;
         }
     }
 }

@@ -15,7 +15,7 @@ namespace Match3
             var mode = (HomeVideoPlaybackMode)property.FindPropertyRelative("mode").enumValueIndex;
             float line = EditorGUIUtility.singleLineHeight;
             float gap = EditorGUIUtility.standardVerticalSpacing;
-            float height = line + gap + (line + gap) * 4;
+            float height = line + gap + (line + gap) * 5;
 
             if (mode == HomeVideoPlaybackMode.Segmented)
             {
@@ -57,6 +57,7 @@ namespace Match3
             y = DrawProp(property, "clip", position.x, y, width, line, gap);
             y = DrawProp(property, "mode", position.x, y, width, line, gap);
             y = DrawProp(property, "loop", position.x, y, width, line, gap);
+            y = DrawProp(property, "mute", position.x, y, width, line, gap, new GUIContent("Mute Audio"));
 
             var mode = (HomeVideoPlaybackMode)property.FindPropertyRelative("mode").enumValueIndex;
             if (mode == HomeVideoPlaybackMode.Segmented)

@@ -18,5 +18,7 @@ EditorBuildSettings:
     path: Assets/Scenes/3_Match3.unity
     guid: 4fe269744d21d6941816fb29d16ca1f7
   m_configObjects:
+    com.unity.adaptiveperformance.loader_settings: {fileID: 11400000, guid: 537d4f45d2f0b734bab56a7026b4e88b,
+      type: 2}
     com.unity.adaptiveperformance.simulator.provider_settings: {fileID: 11400000,
       guid: 498a50b8556c34c4f81afbac501556e3, type: 2}

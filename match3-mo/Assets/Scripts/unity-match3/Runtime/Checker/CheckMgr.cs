@@ -120,7 +120,8 @@ namespace Match3
                 if (dropList) _drop.Add(d);
             }
 
-            Shape("FiveLine", new[] { FinderId.SameTypeH, FinderId.SameTypeV }, 5, SpecialType.LightBall, true);
+            // 4+ in a row/column → gold peach (HMissile / VMissile), behaves like Powder Keg.
+            Shape("FiveLine", new[] { FinderId.SameTypeH, FinderId.SameTypeV }, 5, SpecialType.HMissile, true);
             Shape("TShape", new[] { FinderId.TWord }, 5, SpecialType.PowderKeg, true);
             Shape("LShape", new[] { FinderId.LShape }, 5, SpecialType.PowderKeg, true);
             Shape("FourH", new[] { FinderId.SameTypeH }, 4, SpecialType.HMissile, true);

@@ -12,6 +12,11 @@ namespace Match3
     {
         public List<string> keys = new List<string>();
         public List<int> stars = new List<int>();
+        public bool phoneNotificationDismissed;
+        public bool suzhouFanPopupSeen;
+        public bool friendsPhotoPopupSeen;
+        public bool suzhouFanUnlocked;
+        public bool friendsPhotoUnlocked;
     }
 
     [Serializable]
@@ -28,6 +33,11 @@ namespace Match3
 
         static string _playerKey = string.Empty;
         static readonly Dictionary<string, int> LevelStars = new Dictionary<string, int>();
+        static bool _phoneNotificationDismissed;
+        static bool _suzhouFanPopupSeen;
+        static bool _friendsPhotoPopupSeen;
+        static bool _suzhouFanUnlocked;
+        static bool _friendsPhotoUnlocked;
 
         public static string LevelKey(HomeVideoId videoId, StreetMatch3Slot slot) =>
             $"{videoId}_{slot}";
@@ -35,6 +45,11 @@ namespace Match3
         public static void LoadForPlayer(string playerName)
         {
             LevelStars.Clear();
+            _phoneNotificationDismissed = false;
+            _suzhouFanPopupSeen = false;
+            _friendsPhotoPopupSeen = false;
+            _suzhouFanUnlocked = false;
+            _friendsPhotoUnlocked = false;
             RegisterPlayerName(playerName);
             _playerKey = PrefsKey(playerName);
             string json = PlayerPrefs.GetString(_playerKey, string.Empty);
@@ -44,16 +59,26 @@ namespace Match3
             try
             {
                 var data = JsonUtility.FromJson<PlayerProgressData>(json);
-                if (data?.keys == null || data.stars == null)
+                if (data == null)
                     return;
 
-                int count = Mathf.Min(data.keys.Count, data.stars.Count);
-                for (int i = 0; i < count; i++)
+                if (data.keys != null && data.stars != null)
                 {
-                    if (string.IsNullOrEmpty(data.keys[i]))
-                        continue;
-                    LevelStars[data.keys[i]] = Mathf.Clamp(data.stars[i], 0, 3);
+                    int count = Mathf.Min(data.keys.Count, data.stars.Count);
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (string.IsNullOrEmpty(data.keys[i]))
+                            continue;
+                        LevelStars[data.keys[i]] = Mathf.Clamp(data.stars[i], 0, 3);
+                    }
                 }
+
+                _phoneNotificationDismissed = data.phoneNotificationDismissed;
+                _suzhouFanPopupSeen = data.suzhouFanPopupSeen;
+                _friendsPhotoPopupSeen = data.friendsPhotoPopupSeen;
+                _suzhouFanUnlocked = data.suzhouFanUnlocked;
+                _friendsPhotoUnlocked = data.friendsPhotoUnlocked;
+                SyncPhotoCollectibleUnlocks(saveIfChanged: true);
             }
             catch (Exception e)
             {
@@ -71,6 +96,77 @@ namespace Match3
             return LevelStars.TryGetValue(levelKey, out int stars) ? stars : 0;
         }
 
+        /// <summary>Sum of best stars across all levels for the loaded player.</summary>
+        public static int GetTotalStars()
+        {
+            int total = 0;
+            foreach (var kv in LevelStars)
+                total += Mathf.Clamp(kv.Value, 0, 3);
+            return total;
+        }
+
+        public static bool IsPhoneNotificationDismissed() => _phoneNotificationDismissed;
+
+        /// <summary>After Agree on phone bubble — notification never shows again for this player.</summary>
+        public static void DismissPhoneNotification()
+        {
+            if (_phoneNotificationDismissed || string.IsNullOrEmpty(_playerKey))
+                return;
+            _phoneNotificationDismissed = true;
+            Save();
+        }
+
+        public static bool HasSeenSuzhouFanPopup() => _suzhouFanPopupSeen;
+
+        public static bool HasSeenFriendsPhotoPopup() => _friendsPhotoPopupSeen;
+
+        public static bool IsSuzhouFanUnlocked() => _suzhouFanUnlocked;
+
+        public static bool IsFriendsPhotoUnlocked() => _friendsPhotoUnlocked;
+
+        public static void MarkSuzhouFanPopupSeen()
+        {
+            if (_suzhouFanPopupSeen || string.IsNullOrEmpty(_playerKey))
+                return;
+            _suzhouFanPopupSeen = true;
+            Save();
+        }
+
+        public static void MarkFriendsPhotoPopupSeen()
+        {
+            if (_friendsPhotoPopupSeen || string.IsNullOrEmpty(_playerKey))
+                return;
+            _friendsPhotoPopupSeen = true;
+            Save();
+        }
+
+        /// <summary>
+        /// Persist photo collectibles from 3★ clears so they stay unlocked on Normal Day.
+        /// </summary>
+        public static void SyncPhotoCollectibleUnlocks(bool saveIfChanged = true)
+        {
+            bool dirty = false;
+
+            if (!_suzhouFanUnlocked
+                && (GetStars(HomeVideoId.VacationStreet, StreetMatch3Slot.Left) >= 3
+                    || GetStars(HomeVideoId.VacationStreet, StreetMatch3Slot.Right) >= 3))
+            {
+                _suzhouFanUnlocked = true;
+                dirty = true;
+            }
+
+            if (!_friendsPhotoUnlocked
+                && (GetStars(HomeVideoId.Micro3, StreetMatch3Slot.Left) >= 3
+                    || GetStars(HomeVideoId.Micro3, StreetMatch3Slot.Right) >= 3))
+            {
+                _friendsPhotoUnlocked = true;
+                dirty = true;
+            }
+
+            if (dirty && saveIfChanged && !string.IsNullOrEmpty(_playerKey))
+                Save();
+        }
+
         /// <summary>Keeps the best star count for this level.</summary>
         public static void RecordStars(string levelKey, int stars)
         {
@@ -82,6 +178,7 @@ namespace Match3
                 return;
 
             LevelStars[levelKey] = stars;
+            SyncPhotoCollectibleUnlocks(saveIfChanged: false);
             Save();
         }
 
@@ -148,6 +245,11 @@ namespace Match3
             if (_playerKey == PrefsKey(name))
             {
                 LevelStars.Clear();
+                _phoneNotificationDismissed = false;
+                _suzhouFanPopupSeen = false;
+                _friendsPhotoPopupSeen = false;
+                _suzhouFanUnlocked = false;
+                _friendsPhotoUnlocked = false;
                 _playerKey = string.Empty;
             }
 
@@ -164,13 +266,25 @@ namespace Match3
             PlayerPrefs.DeleteKey(NameRegistryPrefsKey);
             PlayerPrefs.DeleteKey(PlayerNamePrefsKey);
             LevelStars.Clear();
+            _phoneNotificationDismissed = false;
+            _suzhouFanPopupSeen = false;
+            _friendsPhotoPopupSeen = false;
+            _suzhouFanUnlocked = false;
+            _friendsPhotoUnlocked = false;
             _playerKey = string.Empty;
             PlayerPrefs.Save();
         }
 
         static void Save()
         {
-            var data = new PlayerProgressData();
+            var data = new PlayerProgressData
+            {
+                phoneNotificationDismissed = _phoneNotificationDismissed,
+                suzhouFanPopupSeen = _suzhouFanPopupSeen,
+                friendsPhotoPopupSeen = _friendsPhotoPopupSeen,
+                suzhouFanUnlocked = _suzhouFanUnlocked,
+                friendsPhotoUnlocked = _friendsPhotoUnlocked
+            };
             foreach (var kv in LevelStars)
             {
                 data.keys.Add(kv.Key);
