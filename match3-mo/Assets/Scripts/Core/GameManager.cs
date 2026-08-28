@@ -17,6 +17,14 @@ namespace Match3
         public bool HasPendingMatch3Level { get; private set; }
         public bool HasPendingHomeResume { get; private set; }
         public HomeVideoId PendingHomeVideoId { get; private set; }
+        /// <summary>When true, Home seeks to <see cref="PendingHomeResumeTime"/> and shows street pause UI.</summary>
+        public bool PendingHomeResumeAtSegment { get; private set; }
+        public float PendingHomeResumeTime { get; private set; }
+        public int PendingHomePauseIndex { get; private set; }
+
+        bool _match3ResumeAtSegment;
+        float _match3ResumeTime;
+        int _match3PauseIndex;
 
         public Match3LevelConfig ActiveMatch3Level
         {
@@ -74,19 +82,28 @@ namespace Match3
 
         public void LoadMatch3() => LoadScene(SceneIds.Match3);
 
-        public void LoadMatch3FromStreet(HomeVideoId videoId, StreetMatch3Slot slot)
+        public void LoadMatch3FromStreet(
+            HomeVideoId videoId,
+            StreetMatch3Slot slot,
+            int pauseIndex = 0,
+            float resumeTime = 0f,
+            bool resumeAtSegment = false)
         {
             ActiveStreetVideoId = videoId;
             ActiveStreetSlot = slot;
             HasPendingMatch3Level = true;
+            _match3PauseIndex = pauseIndex;
+            _match3ResumeTime = resumeTime;
+            _match3ResumeAtSegment = resumeAtSegment;
             LoadMatch3();
         }
 
         /// <summary>
-        /// Exit Match3 → Home. Street levels resume that street;
-        /// Micro3 Left → Micro1, Micro3 Right → Micro4; others start Normal Day.
+        /// Exit Match3 → Home. Street levels resume that street at the segment pause;
+        /// Micro3 result exit → Micro1/Micro4; Micro3 back button → Normal Day.
         /// </summary>
-        public void ReturnHomeFromMatch3()
+        /// <param name="earlyExit">True when leaving via Back (not result Exit).</param>
+        public void ReturnHomeFromMatch3(bool earlyExit = false)
         {
             if (HasPendingMatch3Level &&
                 (ActiveStreetVideoId == HomeVideoId.NormalStreet ||
@@ -94,33 +111,62 @@ namespace Match3
             {
                 PendingHomeVideoId = ActiveStreetVideoId;
                 HasPendingHomeResume = true;
+                PendingHomeResumeAtSegment = _match3ResumeAtSegment;
+                PendingHomeResumeTime = _match3ResumeTime;
+                PendingHomePauseIndex = _match3PauseIndex;
             }
             else if (HasPendingMatch3Level && ActiveStreetVideoId == HomeVideoId.Micro3)
             {
-                PendingHomeVideoId = ActiveStreetSlot == StreetMatch3Slot.Right
-                    ? HomeVideoId.Micro4
-                    : HomeVideoId.Micro1;
-                HasPendingHomeResume = true;
+                // Back: skip aftermath micros and return home. Result Exit: Micro1 / Micro4.
+                if (earlyExit)
+                {
+                    HasPendingHomeResume = false;
+                    PendingHomeResumeAtSegment = false;
+                    PendingHomeResumeTime = 0f;
+                    PendingHomePauseIndex = 0;
+                }
+                else
+                {
+                    PendingHomeVideoId = ActiveStreetSlot == StreetMatch3Slot.Right
+                        ? HomeVideoId.Micro4
+                        : HomeVideoId.Micro1;
+                    HasPendingHomeResume = true;
+                    PendingHomeResumeAtSegment = false;
+                    PendingHomeResumeTime = 0f;
+                    PendingHomePauseIndex = 0;
+                }
             }
             else
             {
                 HasPendingHomeResume = false;
+                PendingHomeResumeAtSegment = false;
             }
 
             ClearPendingMatch3Level();
             LoadHome();
         }
 
-        public bool TryConsumeHomeResume(out HomeVideoId videoId)
+        public bool TryConsumeHomeResume(
+            out HomeVideoId videoId,
+            out float resumeTime,
+            out int pauseIndex,
+            out bool resumeAtSegment)
         {
             if (!HasPendingHomeResume)
             {
                 videoId = HomeVideoId.NormalDay;
+                resumeTime = 0f;
+                pauseIndex = 0;
+                resumeAtSegment = false;
                 return false;
             }
 
             videoId = PendingHomeVideoId;
+            resumeTime = PendingHomeResumeTime;
+            pauseIndex = PendingHomePauseIndex;
+            resumeAtSegment = PendingHomeResumeAtSegment;
             HasPendingHomeResume = false;
+            PendingHomeResumeAtSegment = false;
             return true;
         }
 

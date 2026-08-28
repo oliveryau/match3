@@ -77,6 +77,8 @@ namespace Match3
         [SerializeField] RectTransform photoFramesRoot;
         [SerializeField] GameObject suzhouFanUi;
         [SerializeField] GameObject friendsPhotoUi;
+        [SerializeField] GameObject suzhouFanGlowUi;
+        [SerializeField] GameObject friendsPhotoGlowUi;
         [Header("Photo Frame Popup")]
         [SerializeField] GameObject photoFramePopup;
         [SerializeField] TMP_Text photoFrameHeaderText;
@@ -86,11 +88,17 @@ namespace Match3
         [SerializeField] Sprite friendsPhotoPopupSprite;
         [Header("Drag Indicators (Normal / Vacation Day)")]
         [SerializeField] GameObject dragIndicatorsUi;
+        [Header("Location")]
+        [SerializeField] TMP_Text locationText;
+        [Header("Street / Travel Finger Hint")]
+        [SerializeField] GameObject streetFingerUi;
+        [SerializeField] GameObject travelFingerUi;
         [SerializeField] HomeVideoId videoId = HomeVideoId.NormalDay;
 
         const string SuzhouFanPopupHeader = "获得苏州纪念品";
         const string FriendsPhotoPopupHeader = "获得与朋友\n的火锅回忆";
-        const float DragIndicatorIdleSeconds = 3f;
+        const float MainButtonFingerIdleSeconds = 2f;
+        const float PhotoFrameGlowSeconds = 3f;
 
         HomeVideoEntry _entry;
         readonly List<float> _pauseTimes = new List<float>();
@@ -100,10 +108,17 @@ namespace Match3
         double _lastTime;
         float _armRealtime;
         bool _dragEnabled;
-        float _dragIdleElapsed;
+        float _mainButtonFingerIdleElapsed;
+        bool _mainButtonFingerArmed;
+        int _mainButtonFingerMode; // 0 none, 1 travel, 2 street
+        bool _pendingResumeAtSegment;
+        float _pendingResumeTime;
+        int _pendingResumePauseIndex;
         Coroutine _loadRoutine;
         Coroutine _phoneNotificationPulse;
         Coroutine _mapTravelPulse;
+        Coroutine _suzhouFanGlowRoutine;
+        Coroutine _friendsPhotoGlowRoutine;
         bool _prepareFailed;
         string _lastError;
         /// <summary>False = normal home, true = vacation home.</summary>
@@ -175,7 +190,10 @@ namespace Match3
                 travelLockedUi.SetActive(false);
             HidePhotoFramePopup();
             SetPhotoFramesVisible(false, false);
+            HidePhotoFrameGlows();
             HideDragIndicators();
+            HideMainButtonFingers();
+            RefreshLocationText();
         }
 
         static void WireStreetButton(Image image, UnityEngine.Events.UnityAction handler)
@@ -210,10 +228,19 @@ namespace Match3
             }
 
             _atVacation = false;
+            _pendingResumeAtSegment = false;
+            _pendingResumeTime = 0f;
+            _pendingResumePauseIndex = 0;
             var startId = HomeVideoId.NormalDay;
             if (GameManager.Instance != null &&
-                GameManager.Instance.TryConsumeHomeResume(out var resumeId))
+                GameManager.Instance.TryConsumeHomeResume(
+                    out var resumeId, out var resumeTime, out var pauseIndex, out var atSegment))
+            {
                 startId = resumeId;
+                _pendingResumeAtSegment = atSegment;
+                _pendingResumeTime = resumeTime;
+                _pendingResumePauseIndex = pauseIndex;
+            }
 
             Play(startId);
         }
@@ -239,7 +266,9 @@ namespace Match3
             HidePhoneNotification();
             HidePhotoFramePopup();
             SetPhotoFramesVisible(false, false);
+            HidePhotoFrameGlows();
             HideDragIndicators();
+            HideMainButtonFingers();
         }
 
         void OnVideoError(VideoPlayer source, string message)
@@ -289,7 +318,7 @@ namespace Match3
             if (TryEditorSwitchVideo())
                 return;
 #endif
-            UpdateDragIndicators();
+            UpdateMainButtonFingerHint();
 
             if (!_watchingPause || videoPlayer == null || !videoPlayer.isPrepared)
                 return;
@@ -401,6 +430,9 @@ namespace Match3
             if (IsMicro(videoId) || IsStreet(videoId))
                 return;
 
+            HideMainButtonFingers();
+            ResetMainButtonFingerIdle();
+
             HidePhonePhotos();
             HideMapUi();
             HidePhoneBubble();
@@ -414,6 +446,9 @@ namespace Match3
             // Normal Day + unlocked: open map first; Micro2 starts from map Travel.
             if (videoId != HomeVideoId.NormalDay || !HasTravelUnlocked())
                 return;
+
+            HideMainButtonFingers();
+            ResetMainButtonFingerIdle();
 
             HidePhonePhotos();
             HidePhoneBubble();
@@ -560,7 +595,10 @@ namespace Match3
                 return;
             }
 
-            GameManager.Instance.LoadMatch3FromStreet(videoId, slot);
+            bool resumeAtSegment = IsStreet(videoId) && _pauseTimes.Count > 0;
+            float resumeTime = resumeAtSegment ? _pauseTimes[Mathf.Clamp(_pauseIndex, 0, _pauseTimes.Count - 1)] : 0f;
+            int pauseIndex = resumeAtSegment ? _pauseIndex : 0;
+            GameManager.Instance.LoadMatch3FromStreet(videoId, slot, pauseIndex, resumeTime, resumeAtSegment);
         }
 
         public void OnBeginDrag(PointerEventData eventData)
@@ -588,30 +626,129 @@ namespace Match3
             videoRect.anchoredPosition = pos;
         }
 
-        void UpdateDragIndicators()
-        {
-            if (!_dragEnabled || !IsDayHomeVideo(videoId))
-            {
-                _dragIdleElapsed = 0f;
-                HideDragIndicators();
-                return;
-            }
-
-            _dragIdleElapsed += Time.unscaledDeltaTime;
-            if (_dragIdleElapsed >= DragIndicatorIdleSeconds)
-                SetGoActive(dragIndicatorsUi, true);
-        }
-
         void NotifyPlayerDragged()
         {
             if (!_dragEnabled || !IsDayHomeVideo(videoId))
                 return;
 
-            _dragIdleElapsed = 0f;
-            HideDragIndicators();
+            if (!PlayerProgress.HasCompletedHomeDragIntro())
+            {
+                PlayerProgress.MarkHomeDragIntroCompleted();
+                HideDragIndicators();
+                RefreshMainButtons();
+            }
         }
 
         void HideDragIndicators() => SetGoActive(dragIndicatorsUi, false);
+
+        void RefreshDragIntroUi()
+        {
+            // Only on the very first home visit — never from idle time.
+            bool showIntro = !PlayerProgress.HasCompletedHomeDragIntro()
+                && IsDayHomeVideo(videoId)
+                && _dragEnabled;
+            SetGoActive(dragIndicatorsUi, showIntro);
+        }
+
+        bool ShouldHoldMainButtonsForDragIntro() =>
+            !PlayerProgress.HasCompletedHomeDragIntro() && IsDayHomeVideo(videoId);
+
+        void UpdateMainButtonFingerHint()
+        {
+            // Travel unlocked on Normal Day takes priority over Street finger.
+            bool travelHint = IsTravelFingerEligible();
+            bool streetHint = !travelHint && IsStreetFingerEligible();
+            int mode = travelHint ? 1 : streetHint ? 2 : 0;
+
+            if (mode == 0)
+            {
+                ResetMainButtonFingerIdle();
+                HideMainButtonFingers();
+                return;
+            }
+
+            if (mode != _mainButtonFingerMode)
+            {
+                _mainButtonFingerMode = mode;
+                _mainButtonFingerArmed = false;
+                HideMainButtonFingers();
+            }
+
+            if (!_mainButtonFingerArmed)
+            {
+                _mainButtonFingerArmed = true;
+                _mainButtonFingerIdleElapsed = 0f;
+                HideMainButtonFingers();
+            }
+
+            _mainButtonFingerIdleElapsed += Time.unscaledDeltaTime;
+            if (_mainButtonFingerIdleElapsed < MainButtonFingerIdleSeconds)
+                return;
+
+            if (travelHint)
+            {
+                SetGoActive(streetFingerUi, false);
+                SetGoActive(travelFingerUi, true);
+            }
+            else
+            {
+                SetGoActive(travelFingerUi, false);
+                SetGoActive(streetFingerUi, true);
+            }
+        }
+
+        bool IsTravelFingerEligible()
+        {
+            if (travelButton == null || !travelButton.activeSelf)
+                return false;
+            if (videoId != HomeVideoId.NormalDay || !HasTravelUnlocked())
+                return false;
+            var button = travelButton.GetComponent<Button>();
+            return button == null || button.interactable;
+        }
+
+        bool IsStreetFingerEligible()
+        {
+            return streetButton != null && streetButton.activeSelf
+                && (videoId == HomeVideoId.NormalDay || videoId == HomeVideoId.VacationDay);
+        }
+
+        void ResetMainButtonFingerIdle()
+        {
+            _mainButtonFingerArmed = false;
+            _mainButtonFingerIdleElapsed = 0f;
+            _mainButtonFingerMode = 0;
+        }
+
+        void HideMainButtonFingers()
+        {
+            SetGoActive(streetFingerUi, false);
+            SetGoActive(travelFingerUi, false);
+        }
+
+        void RefreshLocationText()
+        {
+            if (locationText == null)
+                return;
+
+            locationText.text = LocationLabelFor(videoId);
+        }
+
+        static string LocationLabelFor(HomeVideoId id)
+        {
+            switch (id)
+            {
+                case HomeVideoId.NormalDay: return "家";
+                case HomeVideoId.NormalStreet: return "美食街";
+                case HomeVideoId.VacationDay: return "苏州酒店";
+                case HomeVideoId.VacationStreet: return "苏州美食街";
+                case HomeVideoId.Micro2: return "苏州";
+                case HomeVideoId.Micro1:
+                case HomeVideoId.Micro3:
+                case HomeVideoId.Micro4: return "火锅店";
+                default: return string.Empty;
+            }
+        }
 
         static bool IsDayHomeVideo(HomeVideoId id) =>
             id == HomeVideoId.NormalDay || id == HomeVideoId.VacationDay;
@@ -620,7 +757,7 @@ namespace Match3
         {
             _watchingPause = false;
             _dragEnabled = false;
-            _dragIdleElapsed = 0f;
+            ResetMainButtonFingerIdle();
             _prepareFailed = false;
             _lastError = null;
             HidePauseUi();
@@ -628,8 +765,10 @@ namespace Match3
             HideHotpotUi();
             HideMapUi();
             HideDragIndicators();
+            HideMainButtonFingers();
             ResetPan();
             RefreshMainButtons();
+            RefreshLocationText();
             RefreshPhotoFramesForCurrentVideo();
 
             if (catalog == null || videoPlayer == null)
@@ -644,6 +783,9 @@ namespace Match3
                 Debug.LogError($"HomeVideoDirector: no clip for {videoId}.");
                 yield break;
             }
+
+            if (!IsStreet(videoId))
+                _pendingResumeAtSegment = false;
 
             if (!EnsureDisplayTextureReady())
                 yield break;
@@ -700,6 +842,7 @@ namespace Match3
 
             StartPlaybackForMode();
             RefreshMainButtons();
+            RefreshDragIntroUi();
 
             float frameDeadline = Time.realtimeSinceStartup + 3f;
             while (videoPlayer != null && videoPlayer.frame < 1 && Time.realtimeSinceStartup < frameDeadline)
@@ -724,6 +867,20 @@ namespace Match3
                     _dragEnabled = false;
                     ApplyStreetButtonSprites();
                     BuildPauseTimes();
+                    if (_pendingResumeAtSegment && _pauseTimes.Count > 0)
+                    {
+                        _pauseIndex = Mathf.Clamp(_pendingResumePauseIndex, 0, _pauseTimes.Count - 1);
+                        float resumeTime = _pendingResumeTime > 0.01f
+                            ? _pendingResumeTime
+                            : _pauseTimes[_pauseIndex];
+                        _pendingResumeAtSegment = false;
+                        videoPlayer.time = resumeTime;
+                        videoPlayer.Play();
+                        videoPlayer.Pause();
+                        ShowPauseUi(_pauseIndex);
+                        break;
+                    }
+
                     videoPlayer.Play();
                     if (_pauseTimes.Count > 0)
                     {
@@ -742,6 +899,19 @@ namespace Match3
             bool normalStreet = videoId == HomeVideoId.NormalStreet;
             bool vacationDay = videoId == HomeVideoId.VacationDay;
             bool normalDay = videoId == HomeVideoId.NormalDay;
+
+            // First-time home only: hide main buttons until the player drags once.
+            if (ShouldHoldMainButtonsForDragIntro())
+            {
+                SetGoActive(phoneButton, false);
+                SetGoActive(streetButton, false);
+                SetGoActive(travelButton, false);
+                SetGoActive(homeButton, false);
+                SetGoActive(roomButton, false);
+                RefreshTravelLockState(travelVisible: false);
+                RefreshPhoneNotification(show: false);
+                return;
+            }
 
             if (micro)
             {
@@ -1198,13 +1368,58 @@ namespace Match3
 
         public void OnPhotoFrameOkPressed()
         {
-            if (_activePhotoFramePopup == PhotoFramePopupKind.SuzhouFan)
+            var dismissed = _activePhotoFramePopup;
+            if (dismissed == PhotoFramePopupKind.SuzhouFan)
                 PlayerProgress.MarkSuzhouFanPopupSeen();
-            else if (_activePhotoFramePopup == PhotoFramePopupKind.FriendsPhoto)
+            else if (dismissed == PhotoFramePopupKind.FriendsPhoto)
                 PlayerProgress.MarkFriendsPhotoPopupSeen();
 
             HidePhotoFramePopup();
+            PlayPhotoFrameGlow(dismissed);
             TryShowPendingPhotoFramePopup();
+        }
+
+        void PlayPhotoFrameGlow(PhotoFramePopupKind kind)
+        {
+            if (kind == PhotoFramePopupKind.SuzhouFan)
+            {
+                if (_suzhouFanGlowRoutine != null)
+                    StopCoroutine(_suzhouFanGlowRoutine);
+                _suzhouFanGlowRoutine = StartCoroutine(ShowGlowTemporarily(suzhouFanGlowUi, true));
+            }
+            else if (kind == PhotoFramePopupKind.FriendsPhoto)
+            {
+                if (_friendsPhotoGlowRoutine != null)
+                    StopCoroutine(_friendsPhotoGlowRoutine);
+                _friendsPhotoGlowRoutine = StartCoroutine(ShowGlowTemporarily(friendsPhotoGlowUi, false));
+            }
+        }
+
+        IEnumerator ShowGlowTemporarily(GameObject glow, bool isSuzhou)
+        {
+            SetGoActive(glow, true);
+            yield return new WaitForSecondsRealtime(PhotoFrameGlowSeconds);
+            SetGoActive(glow, false);
+            if (isSuzhou)
+                _suzhouFanGlowRoutine = null;
+            else
+                _friendsPhotoGlowRoutine = null;
+        }
+
+        void HidePhotoFrameGlows()
+        {
+            if (_suzhouFanGlowRoutine != null)
+            {
+                StopCoroutine(_suzhouFanGlowRoutine);
+                _suzhouFanGlowRoutine = null;
+            }
+            if (_friendsPhotoGlowRoutine != null)
+            {
+                StopCoroutine(_friendsPhotoGlowRoutine);
+                _friendsPhotoGlowRoutine = null;
+            }
+            SetGoActive(suzhouFanGlowUi, false);
+            SetGoActive(friendsPhotoGlowUi, false);
         }
 
         void HidePhotoFramePopup()

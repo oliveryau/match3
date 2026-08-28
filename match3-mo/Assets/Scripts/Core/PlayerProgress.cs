@@ -17,6 +17,7 @@ namespace Match3
         public bool friendsPhotoPopupSeen;
         public bool suzhouFanUnlocked;
         public bool friendsPhotoUnlocked;
+        public bool homeDragIntroCompleted;
     }
 
     [Serializable]
@@ -38,6 +39,7 @@ namespace Match3
         static bool _friendsPhotoPopupSeen;
         static bool _suzhouFanUnlocked;
         static bool _friendsPhotoUnlocked;
+        static bool _homeDragIntroCompleted;
 
         public static string LevelKey(HomeVideoId videoId, StreetMatch3Slot slot) =>
             $"{videoId}_{slot}";
@@ -50,6 +52,7 @@ namespace Match3
             _friendsPhotoPopupSeen = false;
             _suzhouFanUnlocked = false;
             _friendsPhotoUnlocked = false;
+            _homeDragIntroCompleted = false;
             RegisterPlayerName(playerName);
             _playerKey = PrefsKey(playerName);
             string json = PlayerPrefs.GetString(_playerKey, string.Empty);
@@ -78,6 +81,16 @@ namespace Match3
                 _friendsPhotoPopupSeen = data.friendsPhotoPopupSeen;
                 _suzhouFanUnlocked = data.suzhouFanUnlocked;
                 _friendsPhotoUnlocked = data.friendsPhotoUnlocked;
+                _homeDragIntroCompleted = data.homeDragIntroCompleted;
+                // Existing saves from before this flag: skip intro if they already played.
+                if (!_homeDragIntroCompleted
+                    && ((data.keys != null && data.keys.Count > 0)
+                        || data.suzhouFanUnlocked
+                        || data.friendsPhotoUnlocked
+                        || data.phoneNotificationDismissed))
+                {
+                    _homeDragIntroCompleted = true;
+                }
                 SyncPhotoCollectibleUnlocks(saveIfChanged: true);
             }
             catch (Exception e)
@@ -113,6 +126,16 @@ namespace Match3
             if (_phoneNotificationDismissed || string.IsNullOrEmpty(_playerKey))
                 return;
             _phoneNotificationDismissed = true;
+            Save();
+        }
+
+        public static bool HasCompletedHomeDragIntro() => _homeDragIntroCompleted;
+
+        public static void MarkHomeDragIntroCompleted()
+        {
+            if (_homeDragIntroCompleted || string.IsNullOrEmpty(_playerKey))
+                return;
+            _homeDragIntroCompleted = true;
             Save();
         }
 
@@ -250,6 +273,7 @@ namespace Match3
                 _friendsPhotoPopupSeen = false;
                 _suzhouFanUnlocked = false;
                 _friendsPhotoUnlocked = false;
+                _homeDragIntroCompleted = false;
                 _playerKey = string.Empty;
             }
 
@@ -271,6 +295,7 @@ namespace Match3
             _friendsPhotoPopupSeen = false;
             _suzhouFanUnlocked = false;
             _friendsPhotoUnlocked = false;
+            _homeDragIntroCompleted = false;
             _playerKey = string.Empty;
             PlayerPrefs.Save();
         }
@@ -283,7 +308,8 @@ namespace Match3
                 suzhouFanPopupSeen = _suzhouFanPopupSeen,
                 friendsPhotoPopupSeen = _friendsPhotoPopupSeen,
                 suzhouFanUnlocked = _suzhouFanUnlocked,
-                friendsPhotoUnlocked = _friendsPhotoUnlocked
+                friendsPhotoUnlocked = _friendsPhotoUnlocked,
+                homeDragIntroCompleted = _homeDragIntroCompleted
             };
             foreach (var kv in LevelStars)
             {
