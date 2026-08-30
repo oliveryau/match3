@@ -39,6 +39,17 @@ namespace Match3
         const float MapTravelPulseSpeed = 4f;
         const float MapTravelPulseMin = 0.95f;
         const float MapTravelPulseMax = 1.05f;
+        const float PhoneBubbleAgreePulseSpeed = 4f;
+        const float PhoneBubbleAgreePulseMin = 0.95f;
+        const float PhoneBubbleAgreePulseMax = 1.05f;
+        const int StarsRequiredForFinalVid = 15;
+        const float FinalVidPulseSpeed = 6f;
+        const float FinalVidPulseMin = 0.95f;
+        const float FinalVidPulseMax = 1.05f;
+        const float StreetStarPulseSpeed = 6f;
+        const float StreetStarPulseMin = 0.9f;
+        const float StreetStarPulseMax = 1.1f;
+        const float StreetStarPulseDuration = 1.5f;
 
         [Header("Main Buttons")]
         [SerializeField] GameObject phoneButton;
@@ -60,8 +71,11 @@ namespace Match3
         [SerializeField] GameObject phoneFood4;
         [Tooltip("Food (5): Micro3 Left or Right — shown after either is 3★")]
         [SerializeField] GameObject phoneFood5;
+        [SerializeField] GameObject phoneFinalVidButton;
+        [SerializeField] GameObject phoneFinalVidGrayedButton;
         [Header("Phone Notification (3+ stars on Normal Day)")]
         [SerializeField] GameObject phoneNotificationButton;
+        [SerializeField] GameObject phoneNotification2Button;
         [SerializeField] GameObject phoneBubbleUi;
         [SerializeField] GameObject phoneBubbleAgreeButton;
         [SerializeField] GameObject phoneBubbleCloseButton;
@@ -77,15 +91,24 @@ namespace Match3
         [SerializeField] RectTransform photoFramesRoot;
         [SerializeField] GameObject suzhouFanUi;
         [SerializeField] GameObject friendsPhotoUi;
+        [SerializeField] GameObject moneyPlantUi;
         [SerializeField] GameObject suzhouFanGlowUi;
         [SerializeField] GameObject friendsPhotoGlowUi;
+        [SerializeField] GameObject moneyPlantGlowUi;
         [Header("Photo Frame Popup")]
         [SerializeField] GameObject photoFramePopup;
         [SerializeField] TMP_Text photoFrameHeaderText;
+        [SerializeField] TMP_Text photoFrameDescriptionText;
         [SerializeField] Image photoFrameCollectionImage;
         [SerializeField] GameObject photoFrameOkButton;
         [SerializeField] Sprite suzhouFanPopupSprite;
         [SerializeField] Sprite friendsPhotoPopupSprite;
+        [Header("Ornaments Preview")]
+        [SerializeField] GameObject ornamentsPreviewUi;
+        [SerializeField] GameObject ornamentsPreviewPopup;
+        [SerializeField] TMP_Text ornamentsPreviewHeaderText;
+        [SerializeField] TMP_Text ornamentsPreviewDescriptionText;
+        [SerializeField] Image ornamentsPreviewCollectionImage;
         [Header("Drag Indicators (Normal / Vacation Day)")]
         [SerializeField] GameObject dragIndicatorsUi;
         [Header("Location")]
@@ -96,9 +119,19 @@ namespace Match3
         [SerializeField] HomeVideoId videoId = HomeVideoId.NormalDay;
 
         const string SuzhouFanPopupHeader = "获得苏州纪念品";
+        const string SuzhouFanPopupDescription = "尝了苏州美味";
         const string FriendsPhotoPopupHeader = "获得与朋友\n的火锅回忆";
+        const string FriendsPhotoPopupDescription = "跟朋友吃火锅";
+        const string MoneyPlantPopupHeader = "获得金钱树";
+        const string MoneyPlantPopupDescription = "获得9颗星以上";
+        static readonly Color OrnamentLockedTint = new Color(0.18f, 0.18f, 0.18f, 1f);
+        static readonly Color OrnamentUnlockedTint = Color.white;
+        static readonly Color OrnamentLockedDescriptionColor = new Color(0xF3 / 255f, 0x91 / 255f, 0x39 / 255f, 1f);
+        static readonly Color OrnamentUnlockedDescriptionColor = new Color(0x34 / 255f, 0xC7 / 255f, 0x59 / 255f, 1f);
         const float MainButtonFingerIdleSeconds = 2f;
         const float PhotoFrameGlowSeconds = 3f;
+        const float OrnamentInspectDuration = 0.35f;
+        const float OrnamentInspectDimAlpha = 0.78431374f;
 
         HomeVideoEntry _entry;
         readonly List<float> _pauseTimes = new List<float>();
@@ -116,15 +149,33 @@ namespace Match3
         int _pendingResumePauseIndex;
         Coroutine _loadRoutine;
         Coroutine _phoneNotificationPulse;
+        Coroutine _phoneNotification2Pulse;
         Coroutine _mapTravelPulse;
+        Coroutine _phoneBubbleAgreePulse;
+        Coroutine _finalVidPulse;
+        Coroutine _streetStarPulse;
         Coroutine _suzhouFanGlowRoutine;
         Coroutine _friendsPhotoGlowRoutine;
+        Coroutine _moneyPlantGlowRoutine;
+        Coroutine _ornamentInspectRoutine;
+        GameObject _ornamentInspectOverlay;
+        Image _ornamentInspectDim;
+        RectTransform _inspectingOrnament;
+        Transform _ornamentRestParent;
+        int _ornamentRestSiblingIndex;
+        Vector2 _ornamentRestAnchoredPosition;
+        Vector3 _ornamentRestScale;
+        Vector3 _ornamentRestWorldPosition;
+        Vector3 _ornamentInspectZoomScale;
+        CanvasGroup _ornamentsPreviewCanvasGroup;
+        bool _ornamentInspected;
+        bool _ornamentPreviewShown;
         bool _prepareFailed;
         string _lastError;
         /// <summary>False = normal home, true = vacation home.</summary>
         bool _atVacation;
         Color _travelImageColor = Color.white;
-        enum PhotoFramePopupKind { None, SuzhouFan, FriendsPhoto }
+        enum PhotoFramePopupKind { None, SuzhouFan, FriendsPhoto, MoneyPlant }
         PhotoFramePopupKind _activePhotoFramePopup;
 
         void Awake()
@@ -164,9 +215,17 @@ namespace Match3
             WireMainButton(mapCloseButton, OnMapClosePressed);
             WireMainButton(mapTravelButton, OnMapTravelPressed);
             WireMainButton(phoneNotificationButton, OnPhoneNotificationPressed);
+            WireMainButton(phoneNotification2Button, OnPhoneNotification2Pressed);
             WireMainButton(phoneBubbleAgreeButton, OnPhoneBubbleAgreePressed);
             WireMainButton(phoneBubbleCloseButton, OnPhoneBubbleClosePressed);
             WireMainButton(photoFrameOkButton, OnPhotoFrameOkPressed);
+            EnableGraphicRaycast(suzhouFanUi);
+            EnableGraphicRaycast(friendsPhotoUi);
+            EnableGraphicRaycast(moneyPlantUi);
+            WireMainButton(suzhouFanUi, OnSuzhouFanOrnamentPressed);
+            WireMainButton(friendsPhotoUi, OnFriendsPhotoOrnamentPressed);
+            WireMainButton(moneyPlantUi, OnMoneyPlantOrnamentPressed);
+            EnsureOrnamentInspectOverlay();
 
             if (travelButton != null)
             {
@@ -186,10 +245,13 @@ namespace Match3
                 phoneBubbleUi.SetActive(false);
             if (phoneNotificationButton != null)
                 phoneNotificationButton.SetActive(false);
+            if (phoneNotification2Button != null)
+                phoneNotification2Button.SetActive(false);
             if (travelLockedUi != null)
                 travelLockedUi.SetActive(false);
             HidePhotoFramePopup();
-            SetPhotoFramesVisible(false, false);
+            SnapOrnamentInspectClosed();
+            SetPhotoFramesVisible(false);
             HidePhotoFrameGlows();
             HideDragIndicators();
             HideMainButtonFingers();
@@ -264,8 +326,10 @@ namespace Match3
             HideMapUi();
             HidePhoneBubble();
             HidePhoneNotification();
+            HidePhoneNotification2();
             HidePhotoFramePopup();
-            SetPhotoFramesVisible(false, false);
+            SnapOrnamentInspectClosed();
+            SetPhotoFramesVisible(false);
             HidePhotoFrameGlows();
             HideDragIndicators();
             HideMainButtonFingers();
@@ -370,6 +434,9 @@ namespace Match3
             else if (id == HomeVideoId.NormalDay || id == HomeVideoId.NormalStreet)
                 _atVacation = false;
 
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.ApplyForHomeVideo(id);
+
             StopLoad();
             _loadRoutine = StartCoroutine(PlayWhenReady(id));
         }
@@ -386,8 +453,7 @@ namespace Match3
             // While the notification is up, Phone opens the bubble instead of photos.
             if (phoneNotificationButton != null && phoneNotificationButton.activeSelf)
             {
-                if (phoneBubbleUi != null)
-                    phoneBubbleUi.SetActive(true);
+                ShowPhoneBubble();
                 return;
             }
 
@@ -398,8 +464,7 @@ namespace Match3
 
         public void OnPhonePhotosClosePressed()
         {
-            if (phonePhotosUi != null)
-                phonePhotosUi.SetActive(false);
+            HidePhonePhotos();
         }
 
         void RefreshPhoneFoods()
@@ -410,6 +475,19 @@ namespace Match3
             SetPhoneFoodActive(phoneFood4, HomeVideoId.VacationStreet, StreetMatch3Slot.Right);
             // Hotpot: either Micro3 level at 3★ unlocks Food (5).
             SetPhoneFoodActive(phoneFood5, HasAnyMicro3ThreeStarClear());
+            RefreshFinalVidButtons();
+        }
+
+        void RefreshFinalVidButtons()
+        {
+            bool unlocked = PlayerProgress.GetTotalStars() >= StarsRequiredForFinalVid;
+            SetGoActive(phoneFinalVidButton, unlocked);
+            SetGoActive(phoneFinalVidGrayedButton, !unlocked);
+
+            if (unlocked && phonePhotosUi != null && phonePhotosUi.activeInHierarchy)
+                StartFinalVidPulse();
+            else
+                StopFinalVidPulse();
         }
 
         static void SetPhoneFoodActive(GameObject foodUi, HomeVideoId levelVideoId, StreetMatch3Slot slot)
@@ -514,8 +592,14 @@ namespace Match3
         {
             if (videoId != HomeVideoId.NormalDay || !HasTravelUnlocked())
                 return;
-            if (phoneBubbleUi != null)
-                phoneBubbleUi.SetActive(true);
+            ShowPhoneBubble();
+        }
+
+        public void OnPhoneNotification2Pressed()
+        {
+            if (phonePhotosUi != null)
+                phonePhotosUi.SetActive(true);
+            RefreshPhoneFoods();
         }
 
         public void OnPhoneBubbleAgreePressed()
@@ -534,12 +618,21 @@ namespace Match3
 
         void HidePhonePhotos()
         {
+            StopFinalVidPulse();
             if (phonePhotosUi != null)
                 phonePhotosUi.SetActive(false);
         }
 
+        void ShowPhoneBubble()
+        {
+            if (phoneBubbleUi != null)
+                phoneBubbleUi.SetActive(true);
+            StartPhoneBubbleAgreePulse();
+        }
+
         void HidePhoneBubble()
         {
+            StopPhoneBubbleAgreePulse();
             if (phoneBubbleUi != null)
                 phoneBubbleUi.SetActive(false);
         }
@@ -549,6 +642,13 @@ namespace Match3
             StopPhoneNotificationPulse();
             if (phoneNotificationButton != null)
                 phoneNotificationButton.SetActive(false);
+        }
+
+        void HidePhoneNotification2()
+        {
+            StopPhoneNotification2Pulse();
+            if (phoneNotification2Button != null)
+                phoneNotification2Button.SetActive(false);
         }
 
         public void OnContinuePressed()
@@ -603,12 +703,14 @@ namespace Match3
 
         public void OnBeginDrag(PointerEventData eventData)
         {
+            if (_ornamentInspected)
+                return;
             NotifyPlayerDragged();
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (!_dragEnabled || videoRect == null || eventData == null)
+            if (_ornamentInspected || !_dragEnabled || videoRect == null || eventData == null)
                 return;
 
             NotifyPlayerDragged();
@@ -703,14 +805,21 @@ namespace Match3
                 return false;
             if (videoId != HomeVideoId.NormalDay || !HasTravelUnlocked())
                 return false;
+            if (HasCompletedVacationStreet())
+                return false;
             var button = travelButton.GetComponent<Button>();
             return button == null || button.interactable;
         }
 
         bool IsStreetFingerEligible()
         {
-            return streetButton != null && streetButton.activeSelf
-                && (videoId == HomeVideoId.NormalDay || videoId == HomeVideoId.VacationDay);
+            if (streetButton == null || !streetButton.activeSelf)
+                return false;
+            if (videoId == HomeVideoId.NormalDay)
+                return !HasCompletedNormalStreet();
+            if (videoId == HomeVideoId.VacationDay)
+                return !HasCompletedVacationStreet();
+            return false;
         }
 
         void ResetMainButtonFingerIdle()
@@ -738,7 +847,7 @@ namespace Match3
         {
             switch (id)
             {
-                case HomeVideoId.NormalDay: return "家";
+                case HomeVideoId.NormalDay: return "我的家";
                 case HomeVideoId.NormalStreet: return "美食街";
                 case HomeVideoId.VacationDay: return "苏州酒店";
                 case HomeVideoId.VacationStreet: return "苏州美食街";
@@ -766,6 +875,7 @@ namespace Match3
             HideMapUi();
             HideDragIndicators();
             HideMainButtonFingers();
+            SnapOrnamentInspectClosed();
             ResetPan();
             RefreshMainButtons();
             RefreshLocationText();
@@ -909,7 +1019,7 @@ namespace Match3
                 SetGoActive(homeButton, false);
                 SetGoActive(roomButton, false);
                 RefreshTravelLockState(travelVisible: false);
-                RefreshPhoneNotification(show: false);
+                RefreshPhoneNotifications(phoneVisible: false);
                 return;
             }
 
@@ -921,7 +1031,7 @@ namespace Match3
                 SetGoActive(homeButton, false);
                 SetGoActive(roomButton, false);
                 RefreshTravelLockState(travelVisible: false);
-                RefreshPhoneNotification(show: false);
+                RefreshPhoneNotifications(phoneVisible: false);
                 return;
             }
 
@@ -934,7 +1044,7 @@ namespace Match3
                 SetGoActive(homeButton, false);
                 SetGoActive(roomButton, true);
                 RefreshTravelLockState(travelVisible: false);
-                RefreshPhoneNotification(show: false);
+                RefreshPhoneNotifications(phoneVisible: false);
                 return;
             }
 
@@ -947,7 +1057,7 @@ namespace Match3
                 SetGoActive(homeButton, true);
                 SetGoActive(roomButton, false);
                 RefreshTravelLockState(travelVisible: false);
-                RefreshPhoneNotification(show: false);
+                RefreshPhoneNotifications(phoneVisible: false);
                 return;
             }
 
@@ -960,7 +1070,7 @@ namespace Match3
                 SetGoActive(homeButton, true);
                 SetGoActive(roomButton, false);
                 RefreshTravelLockState(travelVisible: false);
-                RefreshPhoneNotification(show: false);
+                RefreshPhoneNotifications(phoneVisible: true);
                 return;
             }
 
@@ -971,7 +1081,7 @@ namespace Match3
             SetGoActive(homeButton, false);
             SetGoActive(roomButton, false);
             RefreshTravelLockState(travelVisible: true);
-            RefreshPhoneNotification(show: normalDay && ShouldShowPhoneNotification());
+            RefreshPhoneNotifications(phoneVisible: true);
         }
 
         void RefreshTravelLockState(bool travelVisible)
@@ -1000,12 +1110,31 @@ namespace Match3
         static bool ShouldShowPhoneNotification() =>
             HasTravelUnlocked() && !HasAnyMicro3ThreeStarClear();
 
+        static bool ShouldShowPhoneNotification2() =>
+            PlayerProgress.GetTotalStars() >= StarsRequiredForFinalVid;
+
         static bool HasTravelUnlocked() =>
             PlayerProgress.GetTotalStars() >= StarsRequiredForTravel;
 
         static bool HasAnyMicro3ThreeStarClear() =>
             PlayerProgress.GetStars(HomeVideoId.Micro3, StreetMatch3Slot.Left) >= 3
             || PlayerProgress.GetStars(HomeVideoId.Micro3, StreetMatch3Slot.Right) >= 3;
+
+        static bool HasCompletedVacationStreet() =>
+            PlayerProgress.GetStars(HomeVideoId.VacationStreet, StreetMatch3Slot.Left) >= 3
+            && PlayerProgress.GetStars(HomeVideoId.VacationStreet, StreetMatch3Slot.Right) >= 3;
+
+        static bool HasCompletedNormalStreet() =>
+            PlayerProgress.GetStars(HomeVideoId.NormalStreet, StreetMatch3Slot.Left) >= 3
+            && PlayerProgress.GetStars(HomeVideoId.NormalStreet, StreetMatch3Slot.Right) >= 3;
+
+        void RefreshPhoneNotifications(bool phoneVisible)
+        {
+            bool normalDay = videoId == HomeVideoId.NormalDay;
+            bool vacationDay = videoId == HomeVideoId.VacationDay;
+            RefreshPhoneNotification(show: phoneVisible && normalDay && ShouldShowPhoneNotification());
+            RefreshPhoneNotification2(show: phoneVisible && (normalDay || vacationDay) && ShouldShowPhoneNotification2());
+        }
 
         void RefreshPhoneNotification(bool show)
         {
@@ -1022,6 +1151,22 @@ namespace Match3
             if (!phoneNotificationButton.activeSelf)
                 phoneNotificationButton.SetActive(true);
             StartPhoneNotificationPulse();
+        }
+
+        void RefreshPhoneNotification2(bool show)
+        {
+            if (!show)
+            {
+                HidePhoneNotification2();
+                return;
+            }
+
+            if (phoneNotification2Button == null)
+                return;
+
+            if (!phoneNotification2Button.activeSelf)
+                phoneNotification2Button.SetActive(true);
+            StartPhoneNotification2Pulse();
         }
 
         void StartPhoneNotificationPulse()
@@ -1063,6 +1208,45 @@ namespace Match3
             _phoneNotificationPulse = null;
         }
 
+        void StartPhoneNotification2Pulse()
+        {
+            if (phoneNotification2Button == null)
+                return;
+            if (_phoneNotification2Pulse != null)
+                return;
+            _phoneNotification2Pulse = StartCoroutine(PulsePhoneNotification2());
+        }
+
+        void StopPhoneNotification2Pulse()
+        {
+            if (_phoneNotification2Pulse != null)
+            {
+                StopCoroutine(_phoneNotification2Pulse);
+                _phoneNotification2Pulse = null;
+            }
+
+            if (phoneNotification2Button != null)
+                phoneNotification2Button.transform.localScale = Vector3.one;
+        }
+
+        IEnumerator PulsePhoneNotification2()
+        {
+            var t = phoneNotification2Button != null ? phoneNotification2Button.transform : null;
+            float elapsed = 0f;
+            while (t != null && phoneNotification2Button.activeInHierarchy)
+            {
+                elapsed += Time.deltaTime;
+                float wave = (Mathf.Sin(elapsed * PhoneNotificationPulseSpeed) + 1f) * 0.5f;
+                float scale = Mathf.Lerp(PhoneNotificationPulseMin, PhoneNotificationPulseMax, wave);
+                t.localScale = Vector3.one * scale;
+                yield return null;
+            }
+
+            if (t != null)
+                t.localScale = Vector3.one;
+            _phoneNotification2Pulse = null;
+        }
+
         void StartMapTravelPulse()
         {
             if (mapTravelButton == null)
@@ -1100,6 +1284,87 @@ namespace Match3
             if (t != null)
                 t.localScale = Vector3.one;
             _mapTravelPulse = null;
+        }
+
+        void StartPhoneBubbleAgreePulse()
+        {
+            if (phoneBubbleAgreeButton == null)
+                return;
+            if (_phoneBubbleAgreePulse != null)
+                return;
+            _phoneBubbleAgreePulse = StartCoroutine(PulsePhoneBubbleAgree());
+        }
+
+        void StopPhoneBubbleAgreePulse()
+        {
+            if (_phoneBubbleAgreePulse != null)
+            {
+                StopCoroutine(_phoneBubbleAgreePulse);
+                _phoneBubbleAgreePulse = null;
+            }
+
+            if (phoneBubbleAgreeButton != null)
+                phoneBubbleAgreeButton.transform.localScale = Vector3.one;
+        }
+
+        IEnumerator PulsePhoneBubbleAgree()
+        {
+            var t = phoneBubbleAgreeButton != null ? phoneBubbleAgreeButton.transform : null;
+            float elapsed = 0f;
+            while (t != null && phoneBubbleUi != null && phoneBubbleUi.activeInHierarchy)
+            {
+                elapsed += Time.deltaTime;
+                float wave = (Mathf.Sin(elapsed * PhoneBubbleAgreePulseSpeed) + 1f) * 0.5f;
+                float scale = Mathf.Lerp(PhoneBubbleAgreePulseMin, PhoneBubbleAgreePulseMax, wave);
+                t.localScale = Vector3.one * scale;
+                yield return null;
+            }
+
+            if (t != null)
+                t.localScale = Vector3.one;
+            _phoneBubbleAgreePulse = null;
+        }
+
+        void StartFinalVidPulse()
+        {
+            if (phoneFinalVidButton == null)
+                return;
+            if (_finalVidPulse != null)
+                return;
+            _finalVidPulse = StartCoroutine(PulseFinalVid());
+        }
+
+        void StopFinalVidPulse()
+        {
+            if (_finalVidPulse != null)
+            {
+                StopCoroutine(_finalVidPulse);
+                _finalVidPulse = null;
+            }
+
+            if (phoneFinalVidButton != null)
+                phoneFinalVidButton.transform.localScale = Vector3.one;
+        }
+
+        IEnumerator PulseFinalVid()
+        {
+            var t = phoneFinalVidButton != null ? phoneFinalVidButton.transform : null;
+            float elapsed = 0f;
+            while (t != null
+                && phoneFinalVidButton.activeInHierarchy
+                && phonePhotosUi != null
+                && phonePhotosUi.activeInHierarchy)
+            {
+                elapsed += Time.deltaTime;
+                float wave = (Mathf.Sin(elapsed * FinalVidPulseSpeed) + 1f) * 0.5f;
+                float scale = Mathf.Lerp(FinalVidPulseMin, FinalVidPulseMax, wave);
+                t.localScale = Vector3.one * scale;
+                yield return null;
+            }
+
+            if (t != null)
+                t.localScale = Vector3.one;
+            _finalVidPulse = null;
         }
 
         static void SetGoActive(GameObject go, bool active)
@@ -1264,10 +1529,12 @@ namespace Match3
         {
             int stars = PlayerProgress.GetStars(videoId, slot);
             Match3StarVisuals.Apply(s1, s2, s3, stars);
+            StartStreetStarPulse(stars, s1, s2, s3);
         }
 
         void HidePauseUi()
         {
+            StopStreetStarPulse();
             SetButtonVisible(leftButtonImage, false);
             SetButtonVisible(rightButtonImage, false);
             if (continueButton != null)
@@ -1280,6 +1547,65 @@ namespace Match3
             if (image == null)
                 return;
             image.gameObject.SetActive(visible);
+        }
+
+        void StartStreetStarPulse(int earnedStars, Image s1, Image s2, Image s3)
+        {
+            StopStreetStarPulse();
+            ResetStreetStarScales();
+            if (earnedStars <= 0)
+                return;
+            _streetStarPulse = StartCoroutine(PulseEarnedStreetStars(earnedStars, s1, s2, s3));
+        }
+
+        void StopStreetStarPulse()
+        {
+            if (_streetStarPulse != null)
+            {
+                StopCoroutine(_streetStarPulse);
+                _streetStarPulse = null;
+            }
+
+            ResetStreetStarScales();
+        }
+
+        void ResetStreetStarScales()
+        {
+            ResetStarScale(leftStar1);
+            ResetStarScale(leftStar2);
+            ResetStarScale(leftStar3);
+            ResetStarScale(rightStar1);
+            ResetStarScale(rightStar2);
+            ResetStarScale(rightStar3);
+        }
+
+        static void ResetStarScale(Image star)
+        {
+            if (star != null)
+                star.transform.localScale = Vector3.one;
+        }
+
+        IEnumerator PulseEarnedStreetStars(int earnedStars, Image s1, Image s2, Image s3)
+        {
+            var stars = new[] { s1, s2, s3 };
+            int earned = Mathf.Clamp(earnedStars, 0, 3);
+            float elapsed = 0f;
+            while (elapsed < StreetStarPulseDuration)
+            {
+                elapsed += Time.deltaTime;
+                float wave = (Mathf.Sin(elapsed * StreetStarPulseSpeed) + 1f) * 0.5f;
+                float scale = Mathf.Lerp(StreetStarPulseMin, StreetStarPulseMax, wave);
+                for (int i = 0; i < earned; i++)
+                {
+                    if (stars[i] != null)
+                        stars[i].transform.localScale = Vector3.one * scale;
+                }
+                yield return null;
+            }
+
+            for (int i = 0; i < earned; i++)
+                ResetStarScale(stars[i]);
+            _streetStarPulse = null;
         }
 
         void SetStreetUiVisible(bool visible)
@@ -1298,14 +1624,14 @@ namespace Match3
 
         static bool HasFriendsPhotoUnlocked() => PlayerProgress.IsFriendsPhotoUnlocked();
 
+        static bool HasMoneyPlantUnlocked() => PlayerProgress.IsMoneyPlantUnlocked();
+
         void RefreshPhotoFramesForCurrentVideo()
         {
             PlayerProgress.SyncPhotoCollectibleUnlocks();
 
             bool normalDay = videoId == HomeVideoId.NormalDay;
-            bool showSuzhou = normalDay && HasSuzhouFanUnlocked();
-            bool showFriends = normalDay && HasFriendsPhotoUnlocked();
-            SetPhotoFramesVisible(showSuzhou, showFriends);
+            SetPhotoFramesVisible(normalDay);
 
             if (!normalDay)
             {
@@ -1316,17 +1642,39 @@ namespace Match3
             TryShowPendingPhotoFramePopup();
         }
 
-        void SetPhotoFramesVisible(bool showSuzhou, bool showFriends)
+        void SetPhotoFramesVisible(bool visible)
         {
-            bool any = showSuzhou || showFriends;
+            if (!visible && _inspectingOrnament != null)
+                SnapOrnamentInspectClosed();
+
             if (photoFramesRoot != null)
             {
-                if (photoFramesRoot.gameObject.activeSelf != any)
-                    photoFramesRoot.gameObject.SetActive(any);
+                if (photoFramesRoot.gameObject.activeSelf != visible)
+                    photoFramesRoot.gameObject.SetActive(visible);
             }
 
-            SetGoActive(suzhouFanUi, showSuzhou);
-            SetGoActive(friendsPhotoUi, showFriends);
+            SetGoActive(suzhouFanUi, visible);
+            SetGoActive(friendsPhotoUi, visible);
+            SetGoActive(moneyPlantUi, visible);
+
+            if (visible)
+                ApplyOrnamentUnlockVisuals();
+        }
+
+        void ApplyOrnamentUnlockVisuals()
+        {
+            SetOrnamentCollectedLook(suzhouFanUi, HasSuzhouFanUnlocked());
+            SetOrnamentCollectedLook(friendsPhotoUi, HasFriendsPhotoUnlocked());
+            SetOrnamentCollectedLook(moneyPlantUi, HasMoneyPlantUnlocked());
+        }
+
+        static void SetOrnamentCollectedLook(GameObject ornament, bool collected)
+        {
+            if (ornament == null)
+                return;
+            var image = ornament.GetComponent<Image>();
+            if (image != null)
+                image.color = collected ? OrnamentUnlockedTint : OrnamentLockedTint;
         }
 
         void TryShowPendingPhotoFramePopup()
@@ -1341,29 +1689,30 @@ namespace Match3
             }
 
             if (HasFriendsPhotoUnlocked() && !PlayerProgress.HasSeenFriendsPhotoPopup())
+            {
                 ShowPhotoFramePopup(PhotoFramePopupKind.FriendsPhoto);
+                return;
+            }
+
+            if (HasMoneyPlantUnlocked() && !PlayerProgress.HasSeenMoneyPlantPopup())
+                ShowPhotoFramePopup(PhotoFramePopupKind.MoneyPlant);
         }
 
         void ShowPhotoFramePopup(PhotoFramePopupKind kind)
         {
+            SnapOrnamentInspectClosed();
             _activePhotoFramePopup = kind;
             if (photoFramePopup != null)
                 photoFramePopup.SetActive(true);
 
-            if (kind == PhotoFramePopupKind.SuzhouFan)
-            {
-                if (photoFrameHeaderText != null)
-                    photoFrameHeaderText.text = SuzhouFanPopupHeader;
-                if (photoFrameCollectionImage != null && suzhouFanPopupSprite != null)
-                    photoFrameCollectionImage.sprite = suzhouFanPopupSprite;
-            }
-            else if (kind == PhotoFramePopupKind.FriendsPhoto)
-            {
-                if (photoFrameHeaderText != null)
-                    photoFrameHeaderText.text = FriendsPhotoPopupHeader;
-                if (photoFrameCollectionImage != null && friendsPhotoPopupSprite != null)
-                    photoFrameCollectionImage.sprite = friendsPhotoPopupSprite;
-            }
+            GetOrnamentPopupCopy(OrnamentUiFor(kind), out var header, out var description, out var sprite, out _);
+            if (photoFrameHeaderText != null)
+                photoFrameHeaderText.text = header;
+            if (photoFrameDescriptionText != null)
+                photoFrameDescriptionText.text = description;
+            if (photoFrameCollectionImage != null && sprite != null)
+                photoFrameCollectionImage.sprite = sprite;
+            ApplyOrnamentPreviewCollectedLook(true);
         }
 
         public void OnPhotoFrameOkPressed()
@@ -1373,9 +1722,12 @@ namespace Match3
                 PlayerProgress.MarkSuzhouFanPopupSeen();
             else if (dismissed == PhotoFramePopupKind.FriendsPhoto)
                 PlayerProgress.MarkFriendsPhotoPopupSeen();
+            else if (dismissed == PhotoFramePopupKind.MoneyPlant)
+                PlayerProgress.MarkMoneyPlantPopupSeen();
 
             HidePhotoFramePopup();
             PlayPhotoFrameGlow(dismissed);
+            ApplyOrnamentUnlockVisuals();
             TryShowPendingPhotoFramePopup();
         }
 
@@ -1385,25 +1737,33 @@ namespace Match3
             {
                 if (_suzhouFanGlowRoutine != null)
                     StopCoroutine(_suzhouFanGlowRoutine);
-                _suzhouFanGlowRoutine = StartCoroutine(ShowGlowTemporarily(suzhouFanGlowUi, true));
+                _suzhouFanGlowRoutine = StartCoroutine(ShowGlowTemporarily(suzhouFanGlowUi, kind));
             }
             else if (kind == PhotoFramePopupKind.FriendsPhoto)
             {
                 if (_friendsPhotoGlowRoutine != null)
                     StopCoroutine(_friendsPhotoGlowRoutine);
-                _friendsPhotoGlowRoutine = StartCoroutine(ShowGlowTemporarily(friendsPhotoGlowUi, false));
+                _friendsPhotoGlowRoutine = StartCoroutine(ShowGlowTemporarily(friendsPhotoGlowUi, kind));
+            }
+            else if (kind == PhotoFramePopupKind.MoneyPlant)
+            {
+                if (_moneyPlantGlowRoutine != null)
+                    StopCoroutine(_moneyPlantGlowRoutine);
+                _moneyPlantGlowRoutine = StartCoroutine(ShowGlowTemporarily(moneyPlantGlowUi, kind));
             }
         }
 
-        IEnumerator ShowGlowTemporarily(GameObject glow, bool isSuzhou)
+        IEnumerator ShowGlowTemporarily(GameObject glow, PhotoFramePopupKind kind)
         {
             SetGoActive(glow, true);
             yield return new WaitForSecondsRealtime(PhotoFrameGlowSeconds);
             SetGoActive(glow, false);
-            if (isSuzhou)
+            if (kind == PhotoFramePopupKind.SuzhouFan)
                 _suzhouFanGlowRoutine = null;
-            else
+            else if (kind == PhotoFramePopupKind.FriendsPhoto)
                 _friendsPhotoGlowRoutine = null;
+            else if (kind == PhotoFramePopupKind.MoneyPlant)
+                _moneyPlantGlowRoutine = null;
         }
 
         void HidePhotoFrameGlows()
@@ -1418,8 +1778,14 @@ namespace Match3
                 StopCoroutine(_friendsPhotoGlowRoutine);
                 _friendsPhotoGlowRoutine = null;
             }
+            if (_moneyPlantGlowRoutine != null)
+            {
+                StopCoroutine(_moneyPlantGlowRoutine);
+                _moneyPlantGlowRoutine = null;
+            }
             SetGoActive(suzhouFanGlowUi, false);
             SetGoActive(friendsPhotoGlowUi, false);
+            SetGoActive(moneyPlantGlowUi, false);
         }
 
         void HidePhotoFramePopup()
@@ -1427,6 +1793,405 @@ namespace Match3
             _activePhotoFramePopup = PhotoFramePopupKind.None;
             if (photoFramePopup != null)
                 photoFramePopup.SetActive(false);
+        }
+
+        static void EnableGraphicRaycast(GameObject go)
+        {
+            if (go == null)
+                return;
+            var graphic = go.GetComponent<Graphic>();
+            if (graphic != null)
+                graphic.raycastTarget = true;
+        }
+
+        public void OnSuzhouFanOrnamentPressed() => ToggleOrnamentInspect(suzhouFanUi);
+
+        public void OnFriendsPhotoOrnamentPressed() => ToggleOrnamentInspect(friendsPhotoUi);
+
+        public void OnMoneyPlantOrnamentPressed() => ToggleOrnamentInspect(moneyPlantUi);
+
+        void OnOrnamentInspectOverlayPressed()
+        {
+            if (_ornamentInspected)
+                CloseOrnamentInspect();
+        }
+
+        void ToggleOrnamentInspect(GameObject ornament)
+        {
+            if (ornament == null || !ornament.activeInHierarchy)
+                return;
+            if (_activePhotoFramePopup != PhotoFramePopupKind.None)
+                return;
+
+            var rt = ornament.transform as RectTransform;
+            if (rt == null)
+                return;
+
+            if (_inspectingOrnament == rt && (_ornamentInspected || _ornamentInspectRoutine != null))
+            {
+                CloseOrnamentInspect();
+                return;
+            }
+
+            OpenOrnamentInspect(rt);
+        }
+
+        void EnsureOrnamentInspectOverlay()
+        {
+            if (ornamentsPreviewUi != null)
+                _ornamentInspectOverlay = ornamentsPreviewUi;
+
+            if (_ornamentInspectOverlay == null)
+                return;
+
+            _ornamentInspectDim = _ornamentInspectOverlay.GetComponent<Image>();
+
+            var button = _ornamentInspectOverlay.GetComponent<Button>();
+            if (button == null)
+                button = _ornamentInspectOverlay.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            if (_ornamentInspectDim != null)
+                button.targetGraphic = _ornamentInspectDim;
+            button.onClick.RemoveListener(OnOrnamentInspectOverlayPressed);
+            button.onClick.AddListener(OnOrnamentInspectOverlayPressed);
+
+            if (ornamentsPreviewPopup != null)
+            {
+                _ornamentsPreviewCanvasGroup = ornamentsPreviewPopup.GetComponent<CanvasGroup>();
+                if (_ornamentsPreviewCanvasGroup == null)
+                    _ornamentsPreviewCanvasGroup = ornamentsPreviewPopup.AddComponent<CanvasGroup>();
+            }
+
+            HideOrnamentPreviewDisplay();
+            if (_ornamentInspectDim != null)
+            {
+                var dimColor = _ornamentInspectDim.color;
+                dimColor.a = 0f;
+                _ornamentInspectDim.color = dimColor;
+            }
+            _ornamentInspectOverlay.SetActive(false);
+        }
+
+        void ApplyOrnamentPreviewContent(GameObject ornament)
+        {
+            GetOrnamentPopupCopy(ornament, out var header, out var description, out var sprite, out var collected);
+            if (ornamentsPreviewHeaderText != null)
+                ornamentsPreviewHeaderText.text = header;
+            if (ornamentsPreviewDescriptionText != null)
+                ornamentsPreviewDescriptionText.text = description;
+            if (ornamentsPreviewCollectionImage != null && sprite != null)
+                ornamentsPreviewCollectionImage.sprite = sprite;
+            ApplyOrnamentPreviewCollectedLook(collected);
+        }
+
+        GameObject OrnamentUiFor(PhotoFramePopupKind kind)
+        {
+            if (kind == PhotoFramePopupKind.SuzhouFan)
+                return suzhouFanUi;
+            if (kind == PhotoFramePopupKind.FriendsPhoto)
+                return friendsPhotoUi;
+            if (kind == PhotoFramePopupKind.MoneyPlant)
+                return moneyPlantUi;
+            return null;
+        }
+
+        void GetOrnamentPopupCopy(
+            GameObject ornament,
+            out string header,
+            out string description,
+            out Sprite sprite,
+            out bool collected)
+        {
+            header = string.Empty;
+            description = string.Empty;
+            sprite = null;
+            collected = false;
+
+            if (ornament == suzhouFanUi)
+            {
+                header = SuzhouFanPopupHeader;
+                description = SuzhouFanPopupDescription;
+                sprite = suzhouFanPopupSprite;
+                collected = HasSuzhouFanUnlocked();
+            }
+            else if (ornament == friendsPhotoUi)
+            {
+                header = FriendsPhotoPopupHeader;
+                description = FriendsPhotoPopupDescription;
+                sprite = friendsPhotoPopupSprite;
+                collected = HasFriendsPhotoUnlocked();
+            }
+            else if (ornament == moneyPlantUi)
+            {
+                header = MoneyPlantPopupHeader;
+                description = MoneyPlantPopupDescription;
+                var image = moneyPlantUi != null ? moneyPlantUi.GetComponent<Image>() : null;
+                sprite = image != null ? image.sprite : null;
+                collected = HasMoneyPlantUnlocked();
+            }
+        }
+
+        void ApplyOrnamentPreviewCollectedLook(bool collected)
+        {
+            if (ornamentsPreviewCollectionImage != null)
+                ornamentsPreviewCollectionImage.color = collected ? OrnamentUnlockedTint : OrnamentLockedTint;
+            if (ornamentsPreviewDescriptionText != null)
+                ornamentsPreviewDescriptionText.color = collected
+                    ? OrnamentUnlockedDescriptionColor
+                    : OrnamentLockedDescriptionColor;
+            if (photoFrameCollectionImage != null)
+                photoFrameCollectionImage.color = collected ? OrnamentUnlockedTint : OrnamentLockedTint;
+            if (photoFrameDescriptionText != null)
+                photoFrameDescriptionText.color = collected
+                    ? OrnamentUnlockedDescriptionColor
+                    : OrnamentLockedDescriptionColor;
+        }
+
+        void SetOrnamentPreviewDisplayVisible(bool visible)
+        {
+            _ornamentPreviewShown = visible;
+            if (_ornamentsPreviewCanvasGroup == null)
+                return;
+            _ornamentsPreviewCanvasGroup.alpha = visible ? 1f : 0f;
+            _ornamentsPreviewCanvasGroup.blocksRaycasts = visible;
+            _ornamentsPreviewCanvasGroup.interactable = visible;
+        }
+
+        void HideOrnamentPreviewDisplay() => SetOrnamentPreviewDisplayVisible(false);
+
+        void SetOrnamentShown(RectTransform rt, bool shown)
+        {
+            if (rt == null)
+                return;
+            var cg = rt.GetComponent<CanvasGroup>();
+            if (cg == null)
+                cg = rt.gameObject.AddComponent<CanvasGroup>();
+            cg.alpha = shown ? 1f : 0f;
+            cg.blocksRaycasts = shown;
+            cg.interactable = shown;
+        }
+
+        bool TryGetCollectionTarget(RectTransform ornamentRt, out Vector2 localPos, out Vector3 scale)
+        {
+            localPos = Vector2.zero;
+            scale = _ornamentRestScale;
+            var overlayRt = _ornamentInspectOverlay != null
+                ? _ornamentInspectOverlay.transform as RectTransform
+                : null;
+            var collectionRt = ornamentsPreviewCollectionImage != null
+                ? ornamentsPreviewCollectionImage.rectTransform
+                : null;
+            if (overlayRt == null || collectionRt == null || ornamentRt == null)
+                return false;
+
+            Canvas.ForceUpdateCanvases();
+            Camera cam = OverlayCamera();
+            Vector2 screen = RectTransformUtility.WorldToScreenPoint(cam, collectionRt.position);
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(overlayRt, screen, cam, out localPos))
+                localPos = Vector2.zero;
+
+            float ornamentW = Mathf.Max(1f, ornamentRt.rect.width);
+            float collectionW = Mathf.Max(1f, collectionRt.rect.width);
+            scale = _ornamentRestScale * (collectionW / ornamentW);
+            return true;
+        }
+
+        void OpenOrnamentInspect(RectTransform rt)
+        {
+            EnsureOrnamentInspectOverlay();
+            if (_ornamentInspectOverlay == null)
+                return;
+
+            if (_inspectingOrnament != null && _inspectingOrnament != rt)
+                SnapOrnamentInspectClosed();
+
+            StopOrnamentInspectRoutine();
+
+            _inspectingOrnament = rt;
+            _ornamentRestParent = rt.parent;
+            _ornamentRestSiblingIndex = rt.GetSiblingIndex();
+            _ornamentRestAnchoredPosition = rt.anchoredPosition;
+            _ornamentRestScale = rt.localScale;
+            _ornamentRestWorldPosition = rt.position;
+            _ornamentInspected = true;
+            _ornamentPreviewShown = false;
+
+            ApplyOrnamentPreviewContent(rt.gameObject);
+            HideOrnamentPreviewDisplay();
+            SetOrnamentShown(rt, true);
+
+            _ornamentInspectOverlay.SetActive(true);
+            _ornamentInspectOverlay.transform.SetAsLastSibling();
+            if (_ornamentInspectDim != null)
+            {
+                var dimColor = _ornamentInspectDim.color;
+                dimColor.a = 0f;
+                _ornamentInspectDim.color = dimColor;
+            }
+            rt.SetParent(_ornamentInspectOverlay.transform, true);
+
+            if (!TryGetCollectionTarget(rt, out var targetPos, out var targetScale))
+            {
+                targetPos = Vector2.zero;
+                targetScale = _ornamentRestScale * 3f;
+            }
+            _ornamentInspectZoomScale = targetScale;
+
+            _ornamentInspectRoutine = StartCoroutine(AnimateOrnamentInspect(
+                rt, targetPos, targetScale, OrnamentInspectDimAlpha, ShowOrnamentPreviewAfterFlyIn));
+        }
+
+        void ShowOrnamentPreviewAfterFlyIn()
+        {
+            if (_inspectingOrnament == null)
+                return;
+
+            SetOrnamentShown(_inspectingOrnament, false);
+            RestoreInspectedOrnamentToWall(keepOverlay: true);
+            SetOrnamentPreviewDisplayVisible(true);
+        }
+
+        void CloseOrnamentInspect()
+        {
+            if (_inspectingOrnament == null)
+                return;
+
+            StopOrnamentInspectRoutine();
+            bool fromPreview = _ornamentPreviewShown;
+            _ornamentInspected = false;
+
+            var rt = _inspectingOrnament;
+            HideOrnamentPreviewDisplay();
+
+            if (fromPreview)
+            {
+                SetOrnamentShown(rt, false);
+                if (_ornamentInspectOverlay != null && rt.parent != _ornamentInspectOverlay.transform)
+                    rt.SetParent(_ornamentInspectOverlay.transform, false);
+
+                if (!TryGetCollectionTarget(rt, out var fromPos, out var fromScale))
+                {
+                    fromPos = Vector2.zero;
+                    fromScale = _ornamentInspectZoomScale.sqrMagnitude > 0f
+                        ? _ornamentInspectZoomScale
+                        : _ornamentRestScale;
+                }
+                rt.anchoredPosition = fromPos;
+                rt.localScale = fromScale;
+            }
+
+            SetOrnamentShown(rt, true);
+
+            var overlayRt = _ornamentInspectOverlay != null
+                ? _ornamentInspectOverlay.transform as RectTransform
+                : null;
+            Vector2 targetPos = rt.anchoredPosition;
+            if (overlayRt != null)
+            {
+                Camera cam = OverlayCamera();
+                Vector2 screen = RectTransformUtility.WorldToScreenPoint(cam, _ornamentRestWorldPosition);
+                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(overlayRt, screen, cam, out targetPos))
+                    targetPos = rt.anchoredPosition;
+            }
+
+            _ornamentInspectRoutine = StartCoroutine(AnimateOrnamentInspect(
+                rt, targetPos, _ornamentRestScale, 0f, RestoreInspectedOrnament));
+        }
+
+        void SnapOrnamentInspectClosed()
+        {
+            StopOrnamentInspectRoutine();
+            RestoreInspectedOrnament();
+        }
+
+        void RestoreInspectedOrnamentToWall(bool keepOverlay)
+        {
+            var rt = _inspectingOrnament;
+            if (rt != null && _ornamentRestParent != null)
+            {
+                rt.SetParent(_ornamentRestParent, false);
+                rt.SetSiblingIndex(_ornamentRestSiblingIndex);
+                rt.anchoredPosition = _ornamentRestAnchoredPosition;
+                rt.localScale = _ornamentRestScale;
+            }
+
+            if (!keepOverlay)
+                SetOrnamentShown(rt, true);
+        }
+
+        void RestoreInspectedOrnament()
+        {
+            RestoreInspectedOrnamentToWall(keepOverlay: false);
+            HideOrnamentPreviewDisplay();
+
+            _inspectingOrnament = null;
+            _ornamentRestParent = null;
+            _ornamentInspected = false;
+            _ornamentPreviewShown = false;
+
+            if (_ornamentInspectDim != null)
+            {
+                var c = _ornamentInspectDim.color;
+                c.a = 0f;
+                _ornamentInspectDim.color = c;
+            }
+
+            if (_ornamentInspectOverlay != null)
+                _ornamentInspectOverlay.SetActive(false);
+        }
+
+        IEnumerator AnimateOrnamentInspect(
+            RectTransform rt, Vector2 toPos, Vector3 toScale, float toDimAlpha, System.Action onDone)
+        {
+            Vector2 fromPos = rt.anchoredPosition;
+            Vector3 fromScale = rt.localScale;
+            float fromDim = _ornamentInspectDim != null ? _ornamentInspectDim.color.a : 0f;
+
+            float t = 0f;
+            while (t < 1f)
+            {
+                t += Time.unscaledDeltaTime / OrnamentInspectDuration;
+                float u = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t));
+                rt.anchoredPosition = Vector2.LerpUnclamped(fromPos, toPos, u);
+                rt.localScale = Vector3.LerpUnclamped(fromScale, toScale, u);
+                if (_ornamentInspectDim != null)
+                {
+                    var c = _ornamentInspectDim.color;
+                    c.a = Mathf.Lerp(fromDim, toDimAlpha, u);
+                    _ornamentInspectDim.color = c;
+                }
+                yield return null;
+            }
+
+            rt.anchoredPosition = toPos;
+            rt.localScale = toScale;
+            if (_ornamentInspectDim != null)
+            {
+                var c = _ornamentInspectDim.color;
+                c.a = toDimAlpha;
+                _ornamentInspectDim.color = c;
+            }
+
+            _ornamentInspectRoutine = null;
+            onDone?.Invoke();
+        }
+
+        void StopOrnamentInspectRoutine()
+        {
+            if (_ornamentInspectRoutine == null)
+                return;
+            StopCoroutine(_ornamentInspectRoutine);
+            _ornamentInspectRoutine = null;
+        }
+
+        Camera OverlayCamera()
+        {
+            var canvas = _ornamentInspectOverlay != null
+                ? _ornamentInspectOverlay.GetComponentInParent<Canvas>()
+                : GetComponentInParent<Canvas>();
+            if (canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+                return null;
+            return canvas.worldCamera;
         }
 
         void StopLoad()

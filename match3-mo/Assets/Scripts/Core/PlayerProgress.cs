@@ -15,8 +15,10 @@ namespace Match3
         public bool phoneNotificationDismissed;
         public bool suzhouFanPopupSeen;
         public bool friendsPhotoPopupSeen;
+        public bool moneyPlantPopupSeen;
         public bool suzhouFanUnlocked;
         public bool friendsPhotoUnlocked;
+        public bool moneyPlantUnlocked;
         public bool homeDragIntroCompleted;
     }
 
@@ -37,8 +39,10 @@ namespace Match3
         static bool _phoneNotificationDismissed;
         static bool _suzhouFanPopupSeen;
         static bool _friendsPhotoPopupSeen;
+        static bool _moneyPlantPopupSeen;
         static bool _suzhouFanUnlocked;
         static bool _friendsPhotoUnlocked;
+        static bool _moneyPlantUnlocked;
         static bool _homeDragIntroCompleted;
 
         public static string LevelKey(HomeVideoId videoId, StreetMatch3Slot slot) =>
@@ -50,8 +54,10 @@ namespace Match3
             _phoneNotificationDismissed = false;
             _suzhouFanPopupSeen = false;
             _friendsPhotoPopupSeen = false;
+            _moneyPlantPopupSeen = false;
             _suzhouFanUnlocked = false;
             _friendsPhotoUnlocked = false;
+            _moneyPlantUnlocked = false;
             _homeDragIntroCompleted = false;
             RegisterPlayerName(playerName);
             _playerKey = PrefsKey(playerName);
@@ -79,14 +85,17 @@ namespace Match3
                 _phoneNotificationDismissed = data.phoneNotificationDismissed;
                 _suzhouFanPopupSeen = data.suzhouFanPopupSeen;
                 _friendsPhotoPopupSeen = data.friendsPhotoPopupSeen;
+                _moneyPlantPopupSeen = data.moneyPlantPopupSeen;
                 _suzhouFanUnlocked = data.suzhouFanUnlocked;
                 _friendsPhotoUnlocked = data.friendsPhotoUnlocked;
+                _moneyPlantUnlocked = data.moneyPlantUnlocked;
                 _homeDragIntroCompleted = data.homeDragIntroCompleted;
                 // Existing saves from before this flag: skip intro if they already played.
                 if (!_homeDragIntroCompleted
                     && ((data.keys != null && data.keys.Count > 0)
                         || data.suzhouFanUnlocked
                         || data.friendsPhotoUnlocked
+                        || data.moneyPlantUnlocked
                         || data.phoneNotificationDismissed))
                 {
                     _homeDragIntroCompleted = true;
@@ -143,9 +152,13 @@ namespace Match3
 
         public static bool HasSeenFriendsPhotoPopup() => _friendsPhotoPopupSeen;
 
+        public static bool HasSeenMoneyPlantPopup() => _moneyPlantPopupSeen;
+
         public static bool IsSuzhouFanUnlocked() => _suzhouFanUnlocked;
 
         public static bool IsFriendsPhotoUnlocked() => _friendsPhotoUnlocked;
+
+        public static bool IsMoneyPlantUnlocked() => _moneyPlantUnlocked;
 
         public static void MarkSuzhouFanPopupSeen()
         {
@@ -160,6 +173,14 @@ namespace Match3
             if (_friendsPhotoPopupSeen || string.IsNullOrEmpty(_playerKey))
                 return;
             _friendsPhotoPopupSeen = true;
+            Save();
+        }
+
+        public static void MarkMoneyPlantPopupSeen()
+        {
+            if (_moneyPlantPopupSeen || string.IsNullOrEmpty(_playerKey))
+                return;
+            _moneyPlantPopupSeen = true;
             Save();
         }
 
@@ -183,6 +204,12 @@ namespace Match3
                     || GetStars(HomeVideoId.Micro3, StreetMatch3Slot.Right) >= 3))
             {
                 _friendsPhotoUnlocked = true;
+                dirty = true;
+            }
+
+            if (!_moneyPlantUnlocked && GetTotalStars() >= 9)
+            {
+                _moneyPlantUnlocked = true;
                 dirty = true;
             }
 
@@ -271,8 +298,10 @@ namespace Match3
                 _phoneNotificationDismissed = false;
                 _suzhouFanPopupSeen = false;
                 _friendsPhotoPopupSeen = false;
+                _moneyPlantPopupSeen = false;
                 _suzhouFanUnlocked = false;
                 _friendsPhotoUnlocked = false;
+                _moneyPlantUnlocked = false;
                 _homeDragIntroCompleted = false;
                 _playerKey = string.Empty;
             }
@@ -293,8 +322,10 @@ namespace Match3
             _phoneNotificationDismissed = false;
             _suzhouFanPopupSeen = false;
             _friendsPhotoPopupSeen = false;
+            _moneyPlantPopupSeen = false;
             _suzhouFanUnlocked = false;
             _friendsPhotoUnlocked = false;
+            _moneyPlantUnlocked = false;
             _homeDragIntroCompleted = false;
             _playerKey = string.Empty;
             PlayerPrefs.Save();
@@ -307,8 +338,10 @@ namespace Match3
                 phoneNotificationDismissed = _phoneNotificationDismissed,
                 suzhouFanPopupSeen = _suzhouFanPopupSeen,
                 friendsPhotoPopupSeen = _friendsPhotoPopupSeen,
+                moneyPlantPopupSeen = _moneyPlantPopupSeen,
                 suzhouFanUnlocked = _suzhouFanUnlocked,
                 friendsPhotoUnlocked = _friendsPhotoUnlocked,
+                moneyPlantUnlocked = _moneyPlantUnlocked,
                 homeDragIntroCompleted = _homeDragIntroCompleted
             };
             foreach (var kv in LevelStars)

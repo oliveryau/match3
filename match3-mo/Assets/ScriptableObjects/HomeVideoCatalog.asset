@@ -241,7 +241,7 @@ MonoBehaviour:
     clip: {fileID: 32900000, guid: 751e005192543b7468b6eb07b2a39672, type: 3}
     mode: 1
     loop: 0
-    mute: 1
+    mute: 0
     segments: []
     leftButtonSprite: {fileID: 21300000, guid: 60c33156f72c293418d84e52b69d3087, type: 3}
     rightButtonSprite: {fileID: 21300000, guid: cf744d9f1a4935e4abbae195b8d95e3a,

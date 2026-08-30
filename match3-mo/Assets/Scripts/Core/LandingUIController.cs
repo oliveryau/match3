@@ -20,6 +20,9 @@ namespace Match3
 
         void Awake()
         {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayNamedBgm(AudioManager.Bgm1Name);
+
             if (nameField != null)
             {
                 nameField.characterLimit = MaxNameLength;

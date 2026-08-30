@@ -79,6 +79,7 @@ namespace Match3
         {
             _camera = Camera.main;
             ApplyPendingLevel();
+            ApplyMatch3Bgm();
             EnsureFoodSprites();
             _engine = new Match3Engine(Width, Height);
             _engine.NewTileMatchChance = NewTileMatchChance;
@@ -118,6 +119,17 @@ namespace Match3
                 BoardBackground = level.boardBgSprite;
 
             ConfigureLevelVideo(level);
+        }
+
+        static void ApplyMatch3Bgm()
+        {
+            if (AudioManager.Instance == null)
+                return;
+
+            if (GameManager.Instance != null && GameManager.Instance.HasPendingMatch3Level)
+                AudioManager.Instance.ApplyForMatch3(GameManager.Instance.ActiveStreetVideoId);
+            else
+                AudioManager.Instance.PlayNamedBgm(AudioManager.Bgm1Name);
         }
 
         void ConfigureLevelVideo(Match3LevelConfig level)
