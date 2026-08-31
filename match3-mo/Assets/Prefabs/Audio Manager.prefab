@@ -48,12 +48,92 @@ MonoBehaviour:
   clips:
   - name: bgm-1
     clip: {fileID: 8300000, guid: ddc825046805652449d0524645971f05, type: 3}
-    volume: 1
+    volume: 0.6
     loop: 1
   - name: bgm-2
     clip: {fileID: 8300000, guid: 245a3daecc2a16e469bf0f3ee8668a9c, type: 3}
-    volume: 1
+    volume: 0.6
     loop: 1
+  - name: ui-click
+    clip: {fileID: 8300000, guid: c234cd31fd18aaf4ea4618f6ad19d1b7, type: 3}
+    volume: 1
+    loop: 0
+  - name: notif
+    clip: {fileID: 8300000, guid: 95ccb35a440691a4e9dbf2ca007adb4b, type: 3}
+    volume: 1
+    loop: 0
+  - name: 1star
+    clip: {fileID: 8300000, guid: 062a08e7244fa0f43bf53c760c3212e4, type: 3}
+    volume: 1
+    loop: 0
+  - name: 2star
+    clip: {fileID: 8300000, guid: d96de01ca1675594cb99d20ff5516d3e, type: 3}
+    volume: 1
+    loop: 0
+  - name: 3star
+    clip: {fileID: 8300000, guid: 85270c1d9c5901e46ad98efe5bfbcd55, type: 3}
+    volume: 1
+    loop: 0
+  - name: get-star
+    clip: {fileID: 8300000, guid: 523fa32f940dee544a8aeebf08123d4a, type: 3}
+    volume: 1
+    loop: 0
+  - name: match3-1
+    clip: {fileID: 8300000, guid: 2e20c923484d7ca42b1cc9249ff4f022, type: 3}
+    volume: 1
+    loop: 0
+  - name: match3-2
+    clip: {fileID: 8300000, guid: 61efb79510f716440a19314d6bc0912a, type: 3}
+    volume: 1
+    loop: 0
+  - name: match3-3
+    clip: {fileID: 8300000, guid: a7d23839b8c3ca5429de863340218276, type: 3}
+    volume: 1
+    loop: 0
+  - name: match3-4
+    clip: {fileID: 8300000, guid: 95700afcfa15488438e8138fa2b887d9, type: 3}
+    volume: 1
+    loop: 0
+  - name: match3-5
+    clip: {fileID: 8300000, guid: 35314b637ca20cf4ab3f2e4aa57778ee, type: 3}
+    volume: 1
+    loop: 0
+  - name: match4-1
+    clip: {fileID: 8300000, guid: 146e32f92be00d344aae728b13812401, type: 3}
+    volume: 1
+    loop: 0
+  - name: match4-2
+    clip: {fileID: 8300000, guid: 3c63d4236c042dd4480366ecdd169b0f, type: 3}
+    volume: 1
+    loop: 0
+  - name: match4-3
+    clip: {fileID: 8300000, guid: 8f7eff09c4c38ce479cef74447f13071, type: 3}
+    volume: 1
+    loop: 0
+  - name: match-peach
+    clip: {fileID: 8300000, guid: a12c40eafc8ac7247b0d2538d3517cf6, type: 3}
+    volume: 1
+    loop: 0
+  - name: ding-1
+    clip: {fileID: 8300000, guid: 49c80356d7d9aa542986b6ab29624176, type: 3}
+    volume: 1
+    loop: 0
+  - name: ding-2
+    clip: {fileID: 8300000, guid: db00b31b683ef164fa23396674cd92ac, type: 3}
+    volume: 1
+    loop: 0
+  - name: ding-3
+    clip: {fileID: 8300000, guid: 0898b96b95933d34ca1bf26d8a9ffe41, type: 3}
+    volume: 1
+    loop: 0
+  - name: ding-4
+    clip: {fileID: 8300000, guid: 7edc26801bf23fd47aadee442475e536, type: 3}
+    volume: 1
+    loop: 0
+  - name: ding-5
+    clip: {fileID: 8300000, guid: 5d04968933a25e04f963442666c7fdef, type: 3}
+    volume: 1
+    loop: 0
   bgmCrossfadeSeconds: 1.25
 --- !u!82 &8589964517365369729
 AudioSource:

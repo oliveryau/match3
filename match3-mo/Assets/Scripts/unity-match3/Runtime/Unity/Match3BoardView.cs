@@ -149,6 +149,15 @@ namespace Match3
             levelVideo.NotifyClear(_engine.LastMaxMatchRunLength, _engine.LastWasGoldPeachBurst);
         }
 
+        void PlayMatchClearSfx()
+        {
+            if (AudioManager.Instance == null || _engine == null)
+                return;
+            AudioManager.Instance.PlayMatchClear(
+                _engine.LastWasGoldPeachBurst,
+                _engine.LastMaxMatchRunLength);
+        }
+
         void SyncHud()
         {
             if (Match3ScoreUI.Instance == null)
@@ -283,6 +292,7 @@ namespace Match3
             if (cleared.Count > 0)
             {
                 NotifyLevelVideo();
+                PlayMatchClearSfx();
                 ReportCleared(cleared);
                 yield return BurstCells(cleared);
                 SpawnSpecialViews();
@@ -312,6 +322,7 @@ namespace Match3
 
                 ReportCleared(matches);
                 NotifyLevelVideo();
+                PlayMatchClearSfx();
                 yield return BurstCells(matches);
                 SpawnSpecialViews();
             }
@@ -524,6 +535,9 @@ namespace Match3
                 image.color = c;
                 yield return null;
             }
+
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayGoalDing();
 
             if (go != null)
                 Destroy(go);

@@ -64,7 +64,9 @@ namespace Match3
         Micro1 = 7,
         Micro2 = 8,
         Micro3 = 9,
-        Micro4 = 10
+        Micro4 = 10,
+        Micro5 = 11,
+        Micro6 = 12
     }
 
     [CreateAssetMenu(fileName = "HomeVideoCatalog", menuName = "Match3/Home Video Catalog")]

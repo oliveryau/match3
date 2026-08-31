@@ -57,6 +57,9 @@ namespace Match3
 
         public void OnEnterPressed()
         {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayUiClick();
+
             string playerName = nameField != null ? nameField.text.Trim() : string.Empty;
             if (playerName.Length > MaxNameLength)
                 playerName = playerName.Substring(0, MaxNameLength);
@@ -70,6 +73,9 @@ namespace Match3
 
         public void OnRandomisePressed()
         {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayUiClick();
+
             if (nameField == null)
                 return;
 

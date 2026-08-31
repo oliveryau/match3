@@ -50,7 +50,7 @@ MonoBehaviour:
     clip: {fileID: 32900000, guid: 57a7183c546a43248b4f747a2e90f07b, type: 3}
     mode: 1
     loop: 1
-    mute: 1
+    mute: 0
     segments:
     - startSeconds: 0
       endSeconds: 2.7
@@ -129,7 +129,7 @@ MonoBehaviour:
     clip: {fileID: 32900000, guid: 7084f35cacb728a48acc9324a988d83b, type: 3}
     mode: 1
     loop: 1
-    mute: 1
+    mute: 0
     segments:
     - startSeconds: 0
       endSeconds: 0.5
@@ -281,6 +281,72 @@ MonoBehaviour:
     loopToSegment: 0
   - id: 10
     clip: {fileID: 32900000, guid: c89d4bb92f8bf7f47a8d91071a5058de, type: 3}
+    mode: 2
+    loop: 0
+    mute: 0
+    segments: []
+    leftButtonSprite: {fileID: 0}
+    rightButtonSprite: {fileID: 0}
+    leftLevel:
+      foodSprites: []
+      boardBgSprite: {fileID: 0}
+      goalFoodId: 1
+      targetMatchCount: 15
+      maxTurns: 99
+      video1: {fileID: 0}
+      muteVideo1: 1
+      video2: {fileID: 0}
+      muteVideo2: 1
+      video3: {fileID: 0}
+      muteVideo3: 1
+    rightLevel:
+      foodSprites: []
+      boardBgSprite: {fileID: 0}
+      goalFoodId: 1
+      targetMatchCount: 15
+      maxTurns: 99
+      video1: {fileID: 0}
+      muteVideo1: 1
+      video2: {fileID: 0}
+      muteVideo2: 1
+      video3: {fileID: 0}
+      muteVideo3: 1
+    loopToSegment: 0
+  - id: 11
+    clip: {fileID: 32900000, guid: 44de4d57478e9e342af92913b19afabf, type: 3}
+    mode: 2
+    loop: 0
+    mute: 0
+    segments: []
+    leftButtonSprite: {fileID: 0}
+    rightButtonSprite: {fileID: 0}
+    leftLevel:
+      foodSprites: []
+      boardBgSprite: {fileID: 0}
+      goalFoodId: 1
+      targetMatchCount: 15
+      maxTurns: 99
+      video1: {fileID: 0}
+      muteVideo1: 1
+      video2: {fileID: 0}
+      muteVideo2: 1
+      video3: {fileID: 0}
+      muteVideo3: 1
+    rightLevel:
+      foodSprites: []
+      boardBgSprite: {fileID: 0}
+      goalFoodId: 1
+      targetMatchCount: 15
+      maxTurns: 99
+      video1: {fileID: 0}
+      muteVideo1: 1
+      video2: {fileID: 0}
+      muteVideo2: 1
+      video3: {fileID: 0}
+      muteVideo3: 1
+    loopToSegment: 0
+  - id: 12
+    clip: {fileID: 32900000, guid: 44de4d57478e9e342af92913b19afabf, type: 3}
     mode: 2
     loop: 0
     mute: 0

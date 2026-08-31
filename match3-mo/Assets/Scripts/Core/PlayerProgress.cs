@@ -20,6 +20,8 @@ namespace Match3
         public bool friendsPhotoUnlocked;
         public bool moneyPlantUnlocked;
         public bool homeDragIntroCompleted;
+        public bool achievement1Watched;
+        public bool achievement2Watched;
     }
 
     [Serializable]
@@ -44,6 +46,8 @@ namespace Match3
         static bool _friendsPhotoUnlocked;
         static bool _moneyPlantUnlocked;
         static bool _homeDragIntroCompleted;
+        static bool _achievement1Watched;
+        static bool _achievement2Watched;
 
         public static string LevelKey(HomeVideoId videoId, StreetMatch3Slot slot) =>
             $"{videoId}_{slot}";
@@ -59,6 +63,8 @@ namespace Match3
             _friendsPhotoUnlocked = false;
             _moneyPlantUnlocked = false;
             _homeDragIntroCompleted = false;
+            _achievement1Watched = false;
+            _achievement2Watched = false;
             RegisterPlayerName(playerName);
             _playerKey = PrefsKey(playerName);
             string json = PlayerPrefs.GetString(_playerKey, string.Empty);
@@ -90,6 +96,8 @@ namespace Match3
                 _friendsPhotoUnlocked = data.friendsPhotoUnlocked;
                 _moneyPlantUnlocked = data.moneyPlantUnlocked;
                 _homeDragIntroCompleted = data.homeDragIntroCompleted;
+                _achievement1Watched = data.achievement1Watched;
+                _achievement2Watched = data.achievement2Watched;
                 // Existing saves from before this flag: skip intro if they already played.
                 if (!_homeDragIntroCompleted
                     && ((data.keys != null && data.keys.Count > 0)
@@ -146,6 +154,28 @@ namespace Match3
                 return;
             _homeDragIntroCompleted = true;
             Save();
+        }
+
+        public static bool HasWatchedAchievement1() => _achievement1Watched;
+
+        public static bool HasWatchedAchievement2() => _achievement2Watched;
+
+        public static void MarkAchievement1Watched()
+        {
+            if (_achievement1Watched)
+                return;
+            _achievement1Watched = true;
+            if (!string.IsNullOrEmpty(_playerKey))
+                Save();
+        }
+
+        public static void MarkAchievement2Watched()
+        {
+            if (_achievement2Watched)
+                return;
+            _achievement2Watched = true;
+            if (!string.IsNullOrEmpty(_playerKey))
+                Save();
         }
 
         public static bool HasSeenSuzhouFanPopup() => _suzhouFanPopupSeen;
@@ -303,6 +333,8 @@ namespace Match3
                 _friendsPhotoUnlocked = false;
                 _moneyPlantUnlocked = false;
                 _homeDragIntroCompleted = false;
+                _achievement1Watched = false;
+                _achievement2Watched = false;
                 _playerKey = string.Empty;
             }
 
@@ -327,6 +359,8 @@ namespace Match3
             _friendsPhotoUnlocked = false;
             _moneyPlantUnlocked = false;
             _homeDragIntroCompleted = false;
+            _achievement1Watched = false;
+            _achievement2Watched = false;
             _playerKey = string.Empty;
             PlayerPrefs.Save();
         }
@@ -342,7 +376,9 @@ namespace Match3
                 suzhouFanUnlocked = _suzhouFanUnlocked,
                 friendsPhotoUnlocked = _friendsPhotoUnlocked,
                 moneyPlantUnlocked = _moneyPlantUnlocked,
-                homeDragIntroCompleted = _homeDragIntroCompleted
+                homeDragIntroCompleted = _homeDragIntroCompleted,
+                achievement1Watched = _achievement1Watched,
+                achievement2Watched = _achievement2Watched
             };
             foreach (var kv in LevelStars)
             {

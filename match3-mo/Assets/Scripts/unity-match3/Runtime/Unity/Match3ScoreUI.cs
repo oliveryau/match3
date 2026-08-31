@@ -181,7 +181,7 @@ namespace Match3
         void RefreshTargetText()
         {
             if (targetText != null)
-                targetText.text = $"x{_matchedCount}/{TargetMatchCount}";
+                targetText.text = $"{_matchedCount}/{TargetMatchCount}";
         }
 
         public void SetGoalSprite(Sprite sprite)
@@ -265,6 +265,9 @@ namespace Match3
 
             _unlocked[index] = true;
             Match3StarVisuals.SetEarned(_stars[index], true);
+
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play(AudioManager.GetStar);
 
             if (_pulseRoutines[index] != null)
                 StopCoroutine(_pulseRoutines[index]);

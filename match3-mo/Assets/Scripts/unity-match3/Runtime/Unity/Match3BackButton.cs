@@ -26,6 +26,9 @@ namespace Match3
 
         void OnBackPressed()
         {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayUiClick();
+
             if (GameManager.Instance == null)
             {
                 Debug.LogWarning("Match3BackButton: GameManager missing.");

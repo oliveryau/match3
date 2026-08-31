@@ -18,6 +18,17 @@ namespace Match3
     {
         public const string Bgm1Name = "bgm-1";
         public const string Bgm2Name = "bgm-2";
+        public const string UiClick = "ui-click";
+        public const string ScooterBrake = "scooter-brake";
+        public const string Notif = "notif";
+        public const string Result1Star = "1star";
+        public const string Result2Star = "2star";
+        public const string Result3Star = "3star";
+        public const string GetStar = "get-star";
+        public const string MatchPeach = "match-peach";
+        public const string Match3Prefix = "match3-";
+        public const string Match4Prefix = "match4-";
+        public const string DingPrefix = "ding-";
 
         public static AudioManager Instance { get; private set; }
 
@@ -66,6 +77,8 @@ namespace Match3
                 case HomeVideoId.Micro2:
                 case HomeVideoId.Micro3:
                 case HomeVideoId.Micro4:
+                case HomeVideoId.Micro5:
+                case HomeVideoId.Micro6:
                     FadeOutBgm();
                     return;
                 case HomeVideoId.VacationDay:
@@ -87,6 +100,19 @@ namespace Match3
                 PlayNamedBgm(Bgm1Name);
         }
 
+        public void PlayUiClick() => Play(UiClick);
+
+        public void PlayScooterBrake() => Play(ScooterBrake);
+
+        public void PlayNotif() => Play(Notif);
+
+        /// <summary>Safe for Button.onClick method-group wiring (Add/RemoveListener).</summary>
+        public static void PlayUiClickStatic()
+        {
+            if (Instance != null)
+                Instance.PlayUiClick();
+        }
+
         public void Play(string clipName)
         {
             var entry = FindClip(clipName);
@@ -101,6 +127,41 @@ namespace Match3
             else
                 PlaySfx(entry.clip, entry.volume);
         }
+
+        /// <summary>Play a random SFX named "{prefix}{n}" for n in [firstIndex, lastIndex].</summary>
+        public void PlayRandom(string prefix, int firstIndex, int lastIndex)
+        {
+            if (string.IsNullOrEmpty(prefix) || lastIndex < firstIndex)
+                return;
+            int n = UnityEngine.Random.Range(firstIndex, lastIndex + 1);
+            Play(prefix + n);
+        }
+
+        public void PlayResultStars(int stars)
+        {
+            switch (Mathf.Clamp(stars, 0, 3))
+            {
+                case 1: Play(Result1Star); break;
+                case 2: Play(Result2Star); break;
+                case 3: Play(Result3Star); break;
+            }
+        }
+
+        public void PlayMatchClear(bool goldPeachBurst, int maxMatchRunLength)
+        {
+            if (goldPeachBurst)
+            {
+                Play(MatchPeach);
+                return;
+            }
+
+            if (maxMatchRunLength >= 4)
+                PlayRandom(Match4Prefix, 1, 3);
+            else if (maxMatchRunLength == 3)
+                PlayRandom(Match3Prefix, 1, 5);
+        }
+
+        public void PlayGoalDing() => PlayRandom(DingPrefix, 1, 5);
 
         public void Stop(string clipName)
         {

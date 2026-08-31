@@ -54,6 +54,9 @@ namespace Match3
             ApplyResultImage(earnedStars);
             Match3StarVisuals.Apply(star1, star2, star3, earnedStars);
 
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayResultStars(earnedStars);
+
             if (resultRoot != null)
                 resultRoot.SetActive(true);
         }
@@ -84,6 +87,9 @@ namespace Match3
 
         void OnExitPressed()
         {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayUiClick();
+
             if (GameManager.Instance == null)
             {
                 Debug.LogWarning("Match3ResultUI: GameManager missing.");
