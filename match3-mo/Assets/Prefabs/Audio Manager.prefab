@@ -62,6 +62,10 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 95ccb35a440691a4e9dbf2ca007adb4b, type: 3}
     volume: 1
     loop: 0
+  - name: area-clear
+    clip: {fileID: 8300000, guid: c9e55302c1dfe9640a3f1520bb9b8723, type: 3}
+    volume: 1
+    loop: 0
   - name: 1star
     clip: {fileID: 8300000, guid: 062a08e7244fa0f43bf53c760c3212e4, type: 3}
     volume: 1
@@ -87,14 +91,10 @@ MonoBehaviour:
     volume: 1
     loop: 0
   - name: match3-3
-    clip: {fileID: 8300000, guid: a7d23839b8c3ca5429de863340218276, type: 3}
-    volume: 1
-    loop: 0
-  - name: match3-4
     clip: {fileID: 8300000, guid: 95700afcfa15488438e8138fa2b887d9, type: 3}
     volume: 1
     loop: 0
-  - name: match3-5
+  - name: match3-4
     clip: {fileID: 8300000, guid: 35314b637ca20cf4ab3f2e4aa57778ee, type: 3}
     volume: 1
     loop: 0

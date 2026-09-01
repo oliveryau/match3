@@ -14,6 +14,10 @@ namespace Match3
             _starEmpty = starEmpty;
         }
 
+        public static Sprite EarnedStarSprite => _star;
+
+        public static Sprite EmptyStarSprite => _starEmpty;
+
         public static void Apply(Image star1, Image star2, Image star3, int earnedStars)
         {
             Apply(new[] { star1, star2, star3 }, earnedStars);

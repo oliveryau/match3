@@ -21,6 +21,7 @@ namespace Match3
         public const string UiClick = "ui-click";
         public const string ScooterBrake = "scooter-brake";
         public const string Notif = "notif";
+        public const string AreaClear = "area-clear";
         public const string Result1Star = "1star";
         public const string Result2Star = "2star";
         public const string Result3Star = "3star";
@@ -79,6 +80,7 @@ namespace Match3
                 case HomeVideoId.Micro4:
                 case HomeVideoId.Micro5:
                 case HomeVideoId.Micro6:
+                case HomeVideoId.Micro7:
                     FadeOutBgm();
                     return;
                 case HomeVideoId.VacationDay:
@@ -105,6 +107,8 @@ namespace Match3
         public void PlayScooterBrake() => Play(ScooterBrake);
 
         public void PlayNotif() => Play(Notif);
+
+        public void PlayAreaClear() => Play(AreaClear);
 
         /// <summary>Safe for Button.onClick method-group wiring (Add/RemoveListener).</summary>
         public static void PlayUiClickStatic()
@@ -158,7 +162,7 @@ namespace Match3
             if (maxMatchRunLength >= 4)
                 PlayRandom(Match4Prefix, 1, 3);
             else if (maxMatchRunLength == 3)
-                PlayRandom(Match3Prefix, 1, 5);
+                PlayRandom(Match3Prefix, 1, 4);
         }
 
         public void PlayGoalDing() => PlayRandom(DingPrefix, 1, 5);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 using UnityEngine.Video;
 
@@ -21,6 +22,7 @@ namespace Match3
         [SerializeField] RenderTexture displayTexture;
         [SerializeField] RectTransform videoRect;
         [SerializeField] GameObject streetUi;
+        [SerializeField] GameObject areaClearUi;
         [SerializeField] GameObject continueButton;
         [SerializeField] Image leftButtonImage;
         [SerializeField] Image rightButtonImage;
@@ -39,6 +41,9 @@ namespace Match3
         const float MapTravelPulseSpeed = 4f;
         const float MapTravelPulseMin = 0.95f;
         const float MapTravelPulseMax = 1.05f;
+        const float ContinueButtonPulseSpeed = 4f;
+        const float ContinueButtonPulseMin = 0.95f;
+        const float ContinueButtonPulseMax = 1.05f;
         const float PhoneBubbleAgreePulseSpeed = 4f;
         const float PhoneBubbleAgreePulseMin = 0.95f;
         const float PhoneBubbleAgreePulseMax = 1.05f;
@@ -49,6 +54,8 @@ namespace Match3
         const float StreetStarPulseMin = 0.9f;
         const float StreetStarPulseMax = 1.1f;
         const float StreetStarPulseDuration = 1.5f;
+        const float AreaClearHoldSeconds = 2.5f;
+        const float AreaClearFadeSeconds = 0.8f;
 
         [Header("Main Buttons")]
         [SerializeField] GameObject phoneButton;
@@ -79,7 +86,8 @@ namespace Match3
         [Header("Phone Notification (3+ stars on Normal Day)")]
         [SerializeField] GameObject phoneNotificationButton;
         [SerializeField] GameObject phoneNotification2Button;
-        [SerializeField] GameObject phoneBubbleUi;
+        [FormerlySerializedAs("phoneBubbleUi")]
+        [SerializeField] GameObject phoneWechatUi;
         [SerializeField] GameObject phoneBubbleAgreeButton;
         [SerializeField] GameObject phoneBubbleCloseButton;
         [Header("Map UI (Travel confirm)")]
@@ -115,13 +123,16 @@ namespace Match3
         [SerializeField] TMP_Text ornamentsPreviewHeaderText;
         [SerializeField] TMP_Text ornamentsPreviewDescriptionText;
         [SerializeField] Image ornamentsPreviewCollectionImage;
+        [SerializeField] GameObject ornamentsPreviewLockIcon;
         [Header("Drag Indicators (Normal / Vacation Day)")]
         [SerializeField] GameObject dragIndicatorsUi;
         [Header("Location")]
         [SerializeField] TMP_Text locationText;
-        [Header("Street / Travel Finger Hint")]
+        [Header("Street / Travel / Home / Room Finger Hint")]
         [SerializeField] GameObject streetFingerUi;
         [SerializeField] GameObject travelFingerUi;
+        [SerializeField] GameObject homeFingerUi;
+        [SerializeField] GameObject roomFingerUi;
         [SerializeField] HomeVideoId videoId = HomeVideoId.NormalDay;
 
         const string SuzhouFanPopupHeader = "获得苏州纪念品";
@@ -130,12 +141,13 @@ namespace Match3
         const string FriendsPhotoPopupDescription = "跟朋友吃火锅";
         const string MoneyPlantPopupHeader = "获得金钱树";
         const string MoneyPlantPopupDescription = "获得9颗星以上";
+        const string OrnamentLockedHeader = "???";
         static readonly Color OrnamentLockedTint = new Color(1f, 1f, 1f, 0.45f);
         static readonly Color OrnamentUnlockedTint = Color.white;
         static readonly Color OrnamentLockedDescriptionColor = new Color(0xF3 / 255f, 0x91 / 255f, 0x39 / 255f, 1f);
         static readonly Color OrnamentUnlockedDescriptionColor = new Color(0x34 / 255f, 0xC7 / 255f, 0x59 / 255f, 1f);
         static readonly Vector2 OrnamentPreviewCollectionSize = new Vector2(700f, 600f);
-        static readonly Vector2 MoneyPlantPreviewCollectionSize = new Vector2(600f, 700f);
+        static readonly Vector2 MoneyPlantPreviewCollectionSize = new Vector2(600f, 750f);
         static readonly Vector2 PhotoFramePopupCollectionSize = new Vector2(588.0621f, 518f);
         static readonly Vector2 MoneyPlantPhotoFramePopupCollectionSize = new Vector2(588.0621f, 600f);
         const float MainButtonFingerIdleSeconds = 2f;
@@ -152,19 +164,27 @@ namespace Match3
         float _armRealtime;
         bool _dragEnabled;
         float _mainButtonFingerIdleElapsed;
-        bool _mainButtonFingerArmed;
-        int _mainButtonFingerMode; // 0 none, 1 travel, 2 street
+        int _mainButtonFingerMode; // 0 none, 1 travel, 2 street, 3 home, 4 room
         bool _pendingResumeAtSegment;
         float _pendingResumeTime;
         int _pendingResumePauseIndex;
+        bool _pendingAutoContinue;
+        int _pauseAfterLoopIndex = -1;
         Coroutine _loadRoutine;
         Coroutine _phoneNotificationPulse;
         Coroutine _phoneNotification2Pulse;
         Coroutine _mapTravelPulse;
+        Coroutine _continueButtonPulse;
         Coroutine _phoneBubbleAgreePulse;
         Coroutine _achievement1Pulse;
         Coroutine _achievement2Pulse;
         Coroutine _streetStarPulse;
+        Coroutine _areaClearRoutine;
+        bool _pendingAreaClear;
+        HomeVideoId _pendingAreaClearStreet;
+        bool _areaClearShowing;
+        bool _streetPauseUiVisible;
+        CanvasGroup _areaClearCanvasGroup;
         Coroutine _suzhouFanGlowRoutine;
         Coroutine _friendsPhotoGlowRoutine;
         Coroutine _moneyPlantGlowRoutine;
@@ -256,8 +276,8 @@ namespace Match3
                 mapUi.SetActive(false);
             if (hotpotUi != null)
                 hotpotUi.SetActive(false);
-            if (phoneBubbleUi != null)
-                phoneBubbleUi.SetActive(false);
+            if (phoneWechatUi != null)
+                phoneWechatUi.SetActive(false);
             if (phoneNotificationButton != null)
                 phoneNotificationButton.SetActive(false);
             if (phoneNotification2Button != null)
@@ -312,17 +332,33 @@ namespace Match3
             _pendingResumeAtSegment = false;
             _pendingResumeTime = 0f;
             _pendingResumePauseIndex = 0;
+            _pendingAutoContinue = false;
+            _pauseAfterLoopIndex = -1;
+            _pendingAreaClear = false;
             var startId = HomeVideoId.NormalDay;
-            if (GameManager.Instance != null &&
+            bool fromLanding = GameManager.Instance != null
+                && GameManager.Instance.TryConsumeHomeIntroFromLanding();
+            if (fromLanding && !PlayerProgress.HasWatchedHomeIntro())
+                startId = HomeVideoId.Micro7;
+            else if (GameManager.Instance != null &&
                 GameManager.Instance.TryConsumeHomeResume(
-                    out var resumeId, out var resumeTime, out var pauseIndex, out var atSegment))
+                    out var resumeId, out var resumeTime, out var pauseIndex, out var atSegment, out var autoContinue))
             {
                 startId = resumeId;
                 _pendingResumeAtSegment = atSegment;
                 _pendingResumeTime = resumeTime;
                 _pendingResumePauseIndex = pauseIndex;
+                _pendingAutoContinue = autoContinue;
             }
 
+            if (GameManager.Instance != null &&
+                GameManager.Instance.TryConsumeStreetAreaClear(out var areaClearStreet))
+            {
+                _pendingAreaClear = true;
+                _pendingAreaClearStreet = areaClearStreet;
+            }
+
+            HideAreaClearUi();
             Play(startId);
         }
 
@@ -330,6 +366,7 @@ namespace Match3
         {
             StopLoad();
             _watchingPause = false;
+            _pauseAfterLoopIndex = -1;
             _dragEnabled = false;
             if (videoPlayer != null)
             {
@@ -343,7 +380,7 @@ namespace Match3
             SetStreetUiVisible(false);
             HideHotpotUi();
             HideMapUi();
-            HidePhoneBubble();
+            HidePhoneWechat();
             HidePhoneNotification();
             HidePhoneNotification2();
             HidePhotoFramePopup();
@@ -352,6 +389,7 @@ namespace Match3
             HidePhotoFrameGlows();
             HideDragIndicators();
             HideMainButtonFingers();
+            HideAreaClearUi();
         }
 
         void OnVideoError(VideoPlayer source, string message)
@@ -409,6 +447,12 @@ namespace Match3
                 return;
 
             double time = videoPlayer.time;
+
+            if (_pauseAfterLoopIndex >= 0)
+            {
+                _lastTime = time;
+                return;
+            }
 
             if (_needWrapBeforePause)
             {
@@ -469,10 +513,10 @@ namespace Match3
 
         public void OnPhonePressed()
         {
-            // While the notification is up, Phone opens the bubble instead of photos.
+            // While notification 1 is up, Phone opens WeChat instead of photos.
             if (phoneNotificationButton != null && phoneNotificationButton.activeSelf)
             {
-                ShowPhoneBubble();
+                ShowPhoneWechat();
                 return;
             }
 
@@ -562,7 +606,7 @@ namespace Match3
 
             HidePhonePhotos();
             HideMapUi();
-            HidePhoneBubble();
+            HidePhoneWechat();
             Play(_atVacation || videoId == HomeVideoId.VacationDay
                 ? HomeVideoId.VacationStreet
                 : HomeVideoId.NormalStreet);
@@ -578,7 +622,7 @@ namespace Match3
             ResetMainButtonFingerIdle();
 
             HidePhonePhotos();
-            HidePhoneBubble();
+            HidePhoneWechat();
             if (mapUi != null)
             {
                 mapUi.SetActive(true);
@@ -595,7 +639,7 @@ namespace Match3
         {
             HideMapUi();
             HidePhonePhotos();
-            HidePhoneBubble();
+            HidePhoneWechat();
             Play(HomeVideoId.Micro2);
         }
 
@@ -610,7 +654,9 @@ namespace Match3
         {
             HidePhonePhotos();
             HideMapUi();
-            HidePhoneBubble();
+            HidePhoneWechat();
+            HideMainButtonFingers();
+            ResetMainButtonFingerIdle();
 
             // Vacation Day → Normal Day
             if (videoId == HomeVideoId.VacationDay)
@@ -633,7 +679,9 @@ namespace Match3
 
             HidePhonePhotos();
             HideMapUi();
-            HidePhoneBubble();
+            HidePhoneWechat();
+            HideMainButtonFingers();
+            ResetMainButtonFingerIdle();
             Play(HomeVideoId.VacationDay);
         }
 
@@ -641,7 +689,7 @@ namespace Match3
         {
             if (videoId != HomeVideoId.NormalDay || !HasTravelUnlocked())
                 return;
-            ShowPhoneBubble();
+            ShowPhoneWechat();
         }
 
         public void OnPhoneNotification2Pressed()
@@ -657,7 +705,7 @@ namespace Match3
                 return;
             HidePhonePhotos();
             HideMapUi();
-            HidePhoneBubble();
+            HidePhoneWechat();
             HidePhoneNotification2();
             Play(HomeVideoId.Micro5);
         }
@@ -668,14 +716,14 @@ namespace Match3
                 return;
             HidePhonePhotos();
             HideMapUi();
-            HidePhoneBubble();
+            HidePhoneWechat();
             HidePhoneNotification2();
             Play(HomeVideoId.Micro6);
         }
 
         public void OnPhoneBubbleAgreePressed()
         {
-            HidePhoneBubble();
+            HidePhoneWechat();
             HidePhoneNotification();
             HidePhonePhotos();
             HideMapUi();
@@ -684,7 +732,7 @@ namespace Match3
 
         public void OnPhoneBubbleClosePressed()
         {
-            HidePhoneBubble();
+            HidePhoneWechat();
         }
 
         void HidePhonePhotos()
@@ -695,18 +743,18 @@ namespace Match3
                 phonePhotosUi.SetActive(false);
         }
 
-        void ShowPhoneBubble()
+        void ShowPhoneWechat()
         {
-            if (phoneBubbleUi != null)
-                phoneBubbleUi.SetActive(true);
+            if (phoneWechatUi != null)
+                phoneWechatUi.SetActive(true);
             StartPhoneBubbleAgreePulse();
         }
 
-        void HidePhoneBubble()
+        void HidePhoneWechat()
         {
             StopPhoneBubbleAgreePulse();
-            if (phoneBubbleUi != null)
-                phoneBubbleUi.SetActive(false);
+            if (phoneWechatUi != null)
+                phoneWechatUi.SetActive(false);
         }
 
         void HidePhoneNotification()
@@ -759,6 +807,9 @@ namespace Match3
             LoadMatch3(slot);
         }
 
+        static int PauseIndexForSlot(StreetMatch3Slot slot) =>
+            slot == StreetMatch3Slot.Left ? 0 : 1;
+
         void LoadMatch3(StreetMatch3Slot slot)
         {
             if (GameManager.Instance == null)
@@ -768,8 +819,10 @@ namespace Match3
             }
 
             bool resumeAtSegment = IsStreet(videoId) && _pauseTimes.Count > 0;
-            float resumeTime = resumeAtSegment ? _pauseTimes[Mathf.Clamp(_pauseIndex, 0, _pauseTimes.Count - 1)] : 0f;
-            int pauseIndex = resumeAtSegment ? _pauseIndex : 0;
+            int pauseIndex = resumeAtSegment
+                ? Mathf.Clamp(PauseIndexForSlot(slot), 0, _pauseTimes.Count - 1)
+                : 0;
+            float resumeTime = resumeAtSegment ? _pauseTimes[pauseIndex] : 0f;
             GameManager.Instance.LoadMatch3FromStreet(videoId, slot, pauseIndex, resumeTime, resumeAtSegment);
         }
 
@@ -829,10 +882,11 @@ namespace Match3
 
         void UpdateMainButtonFingerHint()
         {
-            // Travel unlocked on Normal Day takes priority over Street finger.
             bool travelHint = IsTravelFingerEligible();
             bool streetHint = !travelHint && IsStreetFingerEligible();
-            int mode = travelHint ? 1 : streetHint ? 2 : 0;
+            bool homeHint = !travelHint && !streetHint && IsHomeFingerEligible();
+            bool roomHint = !travelHint && !streetHint && !homeHint && IsRoomFingerEligible();
+            int mode = travelHint ? 1 : streetHint ? 2 : homeHint ? 3 : roomHint ? 4 : 0;
 
             if (mode == 0)
             {
@@ -841,16 +895,20 @@ namespace Match3
                 return;
             }
 
+            // Home / Room on completed streets: show immediately.
+            if (mode == 3 || mode == 4)
+            {
+                _mainButtonFingerMode = mode;
+                SetGoActive(streetFingerUi, false);
+                SetGoActive(travelFingerUi, false);
+                SetGoActive(homeFingerUi, mode == 3);
+                SetGoActive(roomFingerUi, mode == 4);
+                return;
+            }
+
             if (mode != _mainButtonFingerMode)
             {
                 _mainButtonFingerMode = mode;
-                _mainButtonFingerArmed = false;
-                HideMainButtonFingers();
-            }
-
-            if (!_mainButtonFingerArmed)
-            {
-                _mainButtonFingerArmed = true;
                 _mainButtonFingerIdleElapsed = 0f;
                 HideMainButtonFingers();
             }
@@ -859,16 +917,10 @@ namespace Match3
             if (_mainButtonFingerIdleElapsed < MainButtonFingerIdleSeconds)
                 return;
 
-            if (travelHint)
-            {
-                SetGoActive(streetFingerUi, false);
-                SetGoActive(travelFingerUi, true);
-            }
-            else
-            {
-                SetGoActive(travelFingerUi, false);
-                SetGoActive(streetFingerUi, true);
-            }
+            SetGoActive(streetFingerUi, mode == 2);
+            SetGoActive(travelFingerUi, mode == 1);
+            SetGoActive(homeFingerUi, false);
+            SetGoActive(roomFingerUi, false);
         }
 
         bool IsTravelFingerEligible()
@@ -894,9 +946,22 @@ namespace Match3
             return false;
         }
 
+        bool IsHomeFingerEligible()
+        {
+            if (homeButton == null || !homeButton.activeSelf)
+                return false;
+            return videoId == HomeVideoId.NormalStreet && HasCompletedNormalStreet();
+        }
+
+        bool IsRoomFingerEligible()
+        {
+            if (roomButton == null || !roomButton.activeSelf)
+                return false;
+            return videoId == HomeVideoId.VacationStreet && HasCompletedVacationStreet();
+        }
+
         void ResetMainButtonFingerIdle()
         {
-            _mainButtonFingerArmed = false;
             _mainButtonFingerIdleElapsed = 0f;
             _mainButtonFingerMode = 0;
         }
@@ -905,6 +970,8 @@ namespace Match3
         {
             SetGoActive(streetFingerUi, false);
             SetGoActive(travelFingerUi, false);
+            SetGoActive(homeFingerUi, false);
+            SetGoActive(roomFingerUi, false);
         }
 
         void RefreshLocationText()
@@ -962,7 +1029,7 @@ namespace Match3
             _entry = catalog.GetEntry(videoId);
             if (_entry == null || _entry.clip == null)
             {
-                if (videoId == HomeVideoId.Micro5 || videoId == HomeVideoId.Micro6)
+                if (videoId == HomeVideoId.Micro5 || videoId == HomeVideoId.Micro6 || videoId == HomeVideoId.Micro7)
                 {
                     Debug.LogWarning($"HomeVideoDirector: {videoId} has no clip yet; returning home.");
                     MarkAchievementWatchedIfNeeded(videoId);
@@ -975,7 +1042,10 @@ namespace Match3
             }
 
             if (!IsStreet(videoId))
+            {
                 _pendingResumeAtSegment = false;
+                _pendingAutoContinue = false;
+            }
 
             if (!EnsureDisplayTextureReady())
                 yield break;
@@ -1033,6 +1103,7 @@ namespace Match3
             StartPlaybackForMode();
             RefreshMainButtons();
             RefreshDragIntroUi();
+            TryStartPendingAreaClear();
 
             float frameDeadline = Time.realtimeSinceStartup + 3f;
             while (videoPlayer != null && videoPlayer.frame < 1 && Time.realtimeSinceStartup < frameDeadline)
@@ -1060,17 +1131,33 @@ namespace Match3
                     if (_pendingResumeAtSegment && _pauseTimes.Count > 0)
                     {
                         _pauseIndex = Mathf.Clamp(_pendingResumePauseIndex, 0, _pauseTimes.Count - 1);
-                        float resumeTime = _pendingResumeTime > 0.01f
-                            ? _pendingResumeTime
-                            : _pauseTimes[_pauseIndex];
+                        bool autoContinue = _pendingAutoContinue;
                         _pendingResumeAtSegment = false;
-                        videoPlayer.time = resumeTime;
-                        videoPlayer.Play();
-                        videoPlayer.Pause();
-                        ShowPauseUi(_pauseIndex);
+                        _pendingAutoContinue = false;
+                        if (autoContinue)
+                        {
+                            // 3★ Match3 exit: resume at this segment's pause, play forward to the
+                            // next segment pause, then show street UI again (one-shot).
+                            int clearedIndex = _pauseIndex;
+                            float resumeTime = _pendingResumeTime > 0.01f
+                                ? _pendingResumeTime
+                                : _pauseTimes[clearedIndex];
+                            PlayForwardToNextSegmentAfterClear(clearedIndex, resumeTime);
+                        }
+                        else
+                        {
+                            float resumeTime = _pendingResumeTime > 0.01f
+                                ? _pendingResumeTime
+                                : _pauseTimes[_pauseIndex];
+                            videoPlayer.time = resumeTime;
+                            videoPlayer.Play();
+                            videoPlayer.Pause();
+                            ShowPauseUi(_pauseIndex);
+                        }
                         break;
                     }
 
+                    _pendingAutoContinue = false;
                     videoPlayer.Play();
                     if (_pauseTimes.Count > 0)
                     {
@@ -1205,6 +1292,77 @@ namespace Match3
             PlayerProgress.GetStars(HomeVideoId.NormalStreet, StreetMatch3Slot.Left) >= 3
             && PlayerProgress.GetStars(HomeVideoId.NormalStreet, StreetMatch3Slot.Right) >= 3;
 
+        /// <summary>
+        /// Pulse Continue when the level at this pause is already 3★ and the other
+        /// street level is not — nudge onward without pulsing on an uncleared level.
+        /// </summary>
+        bool ShouldPulseContinueButton()
+        {
+            if (!IsStreet(videoId) || continueButton == null || !continueButton.activeSelf)
+                return false;
+
+            var currentSlot = (_pauseIndex % 2) == 0 ? StreetMatch3Slot.Left : StreetMatch3Slot.Right;
+            var otherSlot = currentSlot == StreetMatch3Slot.Left
+                ? StreetMatch3Slot.Right
+                : StreetMatch3Slot.Left;
+
+            if (PlayerProgress.GetStars(videoId, currentSlot) < 3)
+                return false;
+            if (PlayerProgress.GetStars(videoId, otherSlot) >= 3)
+                return false;
+            return true;
+        }
+
+        void RefreshContinueButtonPulse()
+        {
+            if (ShouldPulseContinueButton())
+                StartContinueButtonPulse();
+            else
+                StopContinueButtonPulse();
+        }
+
+        void StartContinueButtonPulse()
+        {
+            if (continueButton == null)
+                return;
+            if (_continueButtonPulse != null)
+                return;
+            _continueButtonPulse = StartCoroutine(PulseContinueButton());
+        }
+
+        void StopContinueButtonPulse()
+        {
+            if (_continueButtonPulse != null)
+            {
+                StopCoroutine(_continueButtonPulse);
+                _continueButtonPulse = null;
+            }
+
+            if (continueButton != null)
+                continueButton.transform.localScale = Vector3.one;
+        }
+
+        IEnumerator PulseContinueButton()
+        {
+            var t = continueButton != null ? continueButton.transform : null;
+            float elapsed = 0f;
+            while (t != null
+                   && continueButton != null
+                   && continueButton.activeInHierarchy
+                   && ShouldPulseContinueButton())
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float wave = (Mathf.Sin(elapsed * ContinueButtonPulseSpeed) + 1f) * 0.5f;
+                float scale = Mathf.Lerp(ContinueButtonPulseMin, ContinueButtonPulseMax, wave);
+                t.localScale = Vector3.one * scale;
+                yield return null;
+            }
+
+            if (t != null)
+                t.localScale = Vector3.one;
+            _continueButtonPulse = null;
+        }
+
         HomeVideoId CurrentDayHomeVideo() =>
             _atVacation ? HomeVideoId.VacationDay : HomeVideoId.NormalDay;
 
@@ -1224,7 +1382,7 @@ namespace Match3
             if (!show)
             {
                 HidePhoneNotification();
-                HidePhoneBubble();
+                HidePhoneWechat();
                 return;
             }
 
@@ -1402,7 +1560,7 @@ namespace Match3
         {
             var t = phoneBubbleAgreeButton != null ? phoneBubbleAgreeButton.transform : null;
             float elapsed = 0f;
-            while (t != null && phoneBubbleUi != null && phoneBubbleUi.activeInHierarchy)
+            while (t != null && phoneWechatUi != null && phoneWechatUi.activeInHierarchy)
             {
                 elapsed += Time.deltaTime;
                 float wave = (Mathf.Sin(elapsed * PhoneBubbleAgreePulseSpeed) + 1f) * 0.5f;
@@ -1493,7 +1651,7 @@ namespace Match3
         static bool IsMicro(HomeVideoId id) =>
             id == HomeVideoId.Micro1 || id == HomeVideoId.Micro2
             || id == HomeVideoId.Micro3 || id == HomeVideoId.Micro4
-            || id == HomeVideoId.Micro5 || id == HomeVideoId.Micro6;
+            || id == HomeVideoId.Micro5 || id == HomeVideoId.Micro6 || id == HomeVideoId.Micro7;
 
         static bool UsesNativeAspect(HomeVideoId id)
         {
@@ -1505,10 +1663,27 @@ namespace Match3
             if (_entry == null)
                 return;
 
+            // After clearing the last street segment, loop once then pause at segment 0.
+            if (_pauseAfterLoopIndex >= 0)
+            {
+                _pauseIndex = _pauseAfterLoopIndex;
+                _pauseAfterLoopIndex = -1;
+                BeginWatchingCurrentPause(needWrap: false);
+                return;
+            }
+
             // Travel sequence: Micro2 → Vacation Day
             if (videoId == HomeVideoId.Micro2)
             {
                 Play(HomeVideoId.VacationDay);
+                return;
+            }
+
+            // Landing intro → Normal Day
+            if (videoId == HomeVideoId.Micro7)
+            {
+                PlayerProgress.MarkHomeIntroWatched();
+                Play(HomeVideoId.NormalDay);
                 return;
             }
 
@@ -1587,6 +1762,38 @@ namespace Match3
             }
         }
 
+        void PlayForwardToNextSegmentAfterClear(int clearedPauseIndex, float resumeTime)
+        {
+            if (videoPlayer == null || _pauseTimes.Count == 0)
+                return;
+
+            HidePauseUi();
+            _pauseAfterLoopIndex = -1;
+
+            float length = ClipLength();
+            float start = Mathf.Clamp(resumeTime + 0.02f, 0f, Mathf.Max(0f, length - 0.05f));
+            videoPlayer.time = start;
+
+            if (clearedPauseIndex + 1 < _pauseTimes.Count)
+            {
+                _pauseIndex = clearedPauseIndex + 1;
+                if (!videoPlayer.isPlaying)
+                    videoPlayer.Play();
+                ResumeTowardCurrentPause();
+                return;
+            }
+
+            // Last segment (right level): play through the loop, then pause at segment 0.
+            _pauseIndex = 0;
+            _pauseAfterLoopIndex = 0;
+            _needWrapBeforePause = false;
+            _watchingPause = true;
+            _lastTime = start;
+            _armRealtime = Time.realtimeSinceStartup + 0.12f;
+            if (!videoPlayer.isPlaying)
+                videoPlayer.Play();
+        }
+
         void ResumeTowardCurrentPause()
         {
             if (videoPlayer == null || _pauseTimes.Count == 0)
@@ -1636,6 +1843,7 @@ namespace Match3
 
         void ShowPauseUi(int pauseIndex)
         {
+            _streetPauseUiVisible = true;
             SetStreetUiVisible(true);
 
             bool showLeft = (pauseIndex % 2) == 0;
@@ -1643,12 +1851,139 @@ namespace Match3
             SetButtonVisible(rightButtonImage, !showLeft && _entry != null && _entry.rightButtonSprite != null);
 
             if (showLeft)
+            {
                 RefreshButtonStars(StreetMatch3Slot.Left, leftStar1, leftStar2, leftStar3);
+                SetPlayLevelButtonLabel(
+                    leftPlayLevelButton,
+                    PlayerProgress.HasPlayedLevel(videoId, StreetMatch3Slot.Left));
+            }
             else
+            {
                 RefreshButtonStars(StreetMatch3Slot.Right, rightStar1, rightStar2, rightStar3);
+                SetPlayLevelButtonLabel(
+                    rightPlayLevelButton,
+                    PlayerProgress.HasPlayedLevel(videoId, StreetMatch3Slot.Right));
+            }
 
             if (continueButton != null)
                 continueButton.SetActive(true);
+
+            RefreshContinueButtonPulse();
+        }
+
+        void TryStartPendingAreaClear()
+        {
+            if (!_pendingAreaClear || !IsStreetVideo(videoId) || videoId != _pendingAreaClearStreet)
+                return;
+            if (!IsStreetFullyStarred(videoId))
+                return;
+
+            _pendingAreaClear = false;
+            StartAreaClearPresentation();
+        }
+
+        void StartAreaClearPresentation()
+        {
+            if (areaClearUi == null)
+                return;
+
+            if (_areaClearRoutine != null)
+            {
+                StopCoroutine(_areaClearRoutine);
+                _areaClearRoutine = null;
+            }
+
+            _areaClearShowing = true;
+            SetStreetUiVisible(true);
+            HideStreetPauseControls();
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayAreaClear();
+            _areaClearRoutine = StartCoroutine(AreaClearRoutine());
+        }
+
+        IEnumerator AreaClearRoutine()
+        {
+            areaClearUi.SetActive(true);
+            var cg = EnsureAreaClearCanvasGroup();
+            cg.alpha = 1f;
+            cg.blocksRaycasts = false;
+
+            yield return new WaitForSeconds(AreaClearHoldSeconds);
+
+            float t = 0f;
+            while (t < AreaClearFadeSeconds)
+            {
+                t += Time.deltaTime;
+                cg.alpha = 1f - Mathf.Clamp01(t / AreaClearFadeSeconds);
+                yield return null;
+            }
+
+            _areaClearShowing = false;
+            HideAreaClearUi();
+            if (!_streetPauseUiVisible)
+                SetStreetUiVisible(false);
+            _areaClearRoutine = null;
+        }
+
+        CanvasGroup EnsureAreaClearCanvasGroup()
+        {
+            if (_areaClearCanvasGroup == null && areaClearUi != null)
+            {
+                _areaClearCanvasGroup = areaClearUi.GetComponent<CanvasGroup>();
+                if (_areaClearCanvasGroup == null)
+                    _areaClearCanvasGroup = areaClearUi.AddComponent<CanvasGroup>();
+            }
+
+            return _areaClearCanvasGroup;
+        }
+
+        void HideAreaClearUi()
+        {
+            if (_areaClearRoutine != null)
+            {
+                StopCoroutine(_areaClearRoutine);
+                _areaClearRoutine = null;
+            }
+
+            _areaClearShowing = false;
+
+            if (areaClearUi == null)
+                return;
+
+            var cg = EnsureAreaClearCanvasGroup();
+            if (cg != null)
+                cg.alpha = 0f;
+            areaClearUi.SetActive(false);
+        }
+
+        static bool IsStreetVideo(HomeVideoId id) =>
+            id == HomeVideoId.NormalStreet || id == HomeVideoId.VacationStreet;
+
+        static bool IsStreetFullyStarred(HomeVideoId id) =>
+            PlayerProgress.GetStars(id, StreetMatch3Slot.Left) >= 3
+            && PlayerProgress.GetStars(id, StreetMatch3Slot.Right) >= 3;
+
+        void RefreshPlayLevelButtonLabels()
+        {
+            SetPlayLevelButtonLabel(
+                leftPlayLevelButton,
+                PlayerProgress.HasPlayedLevel(videoId, StreetMatch3Slot.Left));
+            SetPlayLevelButtonLabel(
+                rightPlayLevelButton,
+                PlayerProgress.HasPlayedLevel(videoId, StreetMatch3Slot.Right));
+        }
+
+        const string PlayLevelFirstLabel = "吃吧";
+        const string PlayLevelReplayLabel = "再吃";
+
+        static void SetPlayLevelButtonLabel(GameObject button, bool hasPlayed)
+        {
+            if (button == null)
+                return;
+            var label = button.GetComponentInChildren<TMP_Text>(true);
+            if (label == null)
+                return;
+            label.text = hasPlayed ? PlayLevelReplayLabel : PlayLevelFirstLabel;
         }
 
         void RefreshButtonStars(StreetMatch3Slot slot, Image s1, Image s2, Image s3)
@@ -1660,12 +1995,21 @@ namespace Match3
 
         void HidePauseUi()
         {
+            _streetPauseUiVisible = false;
             StopStreetStarPulse();
+            StopContinueButtonPulse();
+            _pauseAfterLoopIndex = -1;
+            HideStreetPauseControls();
+            if (!_areaClearShowing)
+                SetStreetUiVisible(false);
+        }
+
+        void HideStreetPauseControls()
+        {
             SetButtonVisible(leftButtonImage, false);
             SetButtonVisible(rightButtonImage, false);
             if (continueButton != null)
                 continueButton.SetActive(false);
-            SetStreetUiVisible(false);
         }
 
         static void SetButtonVisible(Image image, bool visible)
@@ -2036,7 +2380,7 @@ namespace Match3
         {
             GetOrnamentPopupCopy(ornament, out var header, out var description, out var sprite, out var collected);
             if (ornamentsPreviewHeaderText != null)
-                ornamentsPreviewHeaderText.text = header;
+                ornamentsPreviewHeaderText.text = collected ? header : OrnamentLockedHeader;
             if (ornamentsPreviewDescriptionText != null)
                 ornamentsPreviewDescriptionText.text = description;
             if (ornamentsPreviewCollectionImage != null && sprite != null)
@@ -2104,6 +2448,8 @@ namespace Match3
 
         void ApplyOrnamentPreviewCollectedLook(bool collected)
         {
+            SetGoActive(ornamentsPreviewLockIcon, !collected);
+
             if (ornamentsPreviewCollectionImage != null)
                 ornamentsPreviewCollectionImage.color = collected ? OrnamentUnlockedTint : OrnamentLockedTint;
             if (ornamentsPreviewDescriptionText != null)

@@ -18,6 +18,8 @@ namespace Match3
         [SerializeField] Button exitButton;
 
         bool _shown;
+        int _earnedStars;
+        bool _streetAreaClearPending;
 
         public bool IsShowing => _shown;
 
@@ -47,9 +49,21 @@ namespace Match3
 
             _shown = true;
             earnedStars = Mathf.Clamp(earnedStars, 0, 3);
+            _earnedStars = earnedStars;
+            _streetAreaClearPending = false;
 
             if (GameManager.Instance != null && GameManager.Instance.HasPendingMatch3Level)
-                PlayerProgress.RecordStars(GameManager.Instance.ActiveMatch3LevelKey, earnedStars);
+            {
+                var key = GameManager.Instance.ActiveMatch3LevelKey;
+                var streetId = GameManager.Instance.ActiveStreetVideoId;
+                bool wasStreetComplete = IsStreetVideo(streetId) && IsStreetFullyStarred(streetId);
+
+                PlayerProgress.RecordStars(key, earnedStars);
+                PlayerProgress.MarkLevelPlayed(key);
+
+                if (IsStreetVideo(streetId) && earnedStars >= 3)
+                    _streetAreaClearPending = !wasStreetComplete && IsStreetFullyStarred(streetId);
+            }
 
             ApplyResultImage(earnedStars);
             Match3StarVisuals.Apply(star1, star2, star3, earnedStars);
@@ -81,9 +95,18 @@ namespace Match3
         public void Hide()
         {
             _shown = false;
+            _earnedStars = 0;
+            _streetAreaClearPending = false;
             if (resultRoot != null)
                 resultRoot.SetActive(false);
         }
+
+        static bool IsStreetVideo(HomeVideoId id) =>
+            id == HomeVideoId.NormalStreet || id == HomeVideoId.VacationStreet;
+
+        static bool IsStreetFullyStarred(HomeVideoId id) =>
+            PlayerProgress.GetStars(id, StreetMatch3Slot.Left) >= 3
+            && PlayerProgress.GetStars(id, StreetMatch3Slot.Right) >= 3;
 
         void OnExitPressed()
         {
@@ -96,7 +119,13 @@ namespace Match3
                 return;
             }
 
-            GameManager.Instance.ReturnHomeFromMatch3();
+            if (_streetAreaClearPending)
+            {
+                GameManager.Instance.QueueStreetAreaClear(GameManager.Instance.ActiveStreetVideoId);
+                _streetAreaClearPending = false;
+            }
+
+            GameManager.Instance.ReturnHomeFromMatch3(match3EarnedStars: _earnedStars);
         }
     }
 }

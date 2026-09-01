@@ -22,6 +22,13 @@ namespace Match3
         public float PendingHomeResumeTime { get; private set; }
         public int PendingHomePauseIndex { get; private set; }
 
+        /// <summary>When true with segment resume, skip pause UI and keep playing past the segment.</summary>
+        public bool PendingHomeAutoContinue { get; private set; }
+
+        bool _pendingStreetAreaClear;
+        HomeVideoId _pendingStreetAreaClearVideoId;
+        bool _pendingHomeIntroFromLanding;
+
         bool _match3ResumeAtSegment;
         float _match3ResumeTime;
         int _match3PauseIndex;
@@ -80,6 +87,21 @@ namespace Match3
 
         public void LoadHome() => LoadScene(SceneIds.Home);
 
+        public void LoadHomeFromLanding()
+        {
+            _pendingHomeIntroFromLanding = true;
+            LoadHome();
+        }
+
+        public bool TryConsumeHomeIntroFromLanding()
+        {
+            if (!_pendingHomeIntroFromLanding)
+                return false;
+
+            _pendingHomeIntroFromLanding = false;
+            return true;
+        }
+
         public void LoadMatch3() => LoadScene(SceneIds.Match3);
 
         public void LoadMatch3FromStreet(
@@ -103,7 +125,8 @@ namespace Match3
         /// Micro3 result exit → Micro1/Micro4; Micro3 back button → Normal Day.
         /// </summary>
         /// <param name="earlyExit">True when leaving via Back (not result Exit).</param>
-        public void ReturnHomeFromMatch3(bool earlyExit = false)
+        /// <param name="match3EarnedStars">Stars earned on this Match3 run (0 if unknown / back).</param>
+        public void ReturnHomeFromMatch3(bool earlyExit = false, int match3EarnedStars = 0)
         {
             if (HasPendingMatch3Level &&
                 (ActiveStreetVideoId == HomeVideoId.NormalStreet ||
@@ -114,9 +137,12 @@ namespace Match3
                 PendingHomeResumeAtSegment = _match3ResumeAtSegment;
                 PendingHomeResumeTime = _match3ResumeTime;
                 PendingHomePauseIndex = _match3PauseIndex;
+                // One-shot: auto-advance only when exiting after a 3★ clear this run.
+                PendingHomeAutoContinue = !earlyExit && match3EarnedStars >= 3;
             }
             else if (HasPendingMatch3Level && ActiveStreetVideoId == HomeVideoId.Micro3)
             {
+                PendingHomeAutoContinue = false;
                 // Back: skip aftermath micros and return home. Result Exit: Micro1 / Micro4.
                 if (earlyExit)
                 {
@@ -140,6 +166,7 @@ namespace Match3
             {
                 HasPendingHomeResume = false;
                 PendingHomeResumeAtSegment = false;
+                PendingHomeAutoContinue = false;
             }
 
             ClearPendingMatch3Level();
@@ -150,7 +177,8 @@ namespace Match3
             out HomeVideoId videoId,
             out float resumeTime,
             out int pauseIndex,
-            out bool resumeAtSegment)
+            out bool resumeAtSegment,
+            out bool autoContinue)
         {
             if (!HasPendingHomeResume)
             {
@@ -158,6 +186,7 @@ namespace Match3
                 resumeTime = 0f;
                 pauseIndex = 0;
                 resumeAtSegment = false;
+                autoContinue = false;
                 return false;
             }
 
@@ -165,14 +194,38 @@ namespace Match3
             resumeTime = PendingHomeResumeTime;
             pauseIndex = PendingHomePauseIndex;
             resumeAtSegment = PendingHomeResumeAtSegment;
+            autoContinue = PendingHomeAutoContinue;
             HasPendingHomeResume = false;
             PendingHomeResumeAtSegment = false;
+            PendingHomeAutoContinue = false;
             return true;
         }
 
         public void ClearPendingMatch3Level()
         {
             HasPendingMatch3Level = false;
+        }
+
+        public void QueueStreetAreaClear(HomeVideoId videoId)
+        {
+            if (videoId != HomeVideoId.NormalStreet && videoId != HomeVideoId.VacationStreet)
+                return;
+
+            _pendingStreetAreaClear = true;
+            _pendingStreetAreaClearVideoId = videoId;
+        }
+
+        public bool TryConsumeStreetAreaClear(out HomeVideoId videoId)
+        {
+            if (!_pendingStreetAreaClear)
+            {
+                videoId = HomeVideoId.NormalDay;
+                return false;
+            }
+
+            videoId = _pendingStreetAreaClearVideoId;
+            _pendingStreetAreaClear = false;
+            return true;
         }
 
         public void LoadScene(string sceneName)

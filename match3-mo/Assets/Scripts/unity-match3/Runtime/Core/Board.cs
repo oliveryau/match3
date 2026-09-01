@@ -283,23 +283,28 @@ namespace Match3
 
         public void CompactColumnDown(int x, List<Cell> moved)
         {
-            var stack = new List<Cell>();
-            for (int y = 0; y < Height; y++)
+            for (int targetY = 0; targetY < Height; targetY++)
             {
-                var cell = Get(x, y);
-                if (cell != null)
-                    stack.Add(cell);
-            }
+                var occupant = Get(x, targetY);
+                if (occupant != null)
+                    continue;
 
-            for (int y = 0; y < Height; y++)
-                Set(x, y, null);
+                for (int scanY = targetY + 1; scanY < Height; scanY++)
+                {
+                    var cell = Get(x, scanY);
+                    if (cell == null)
+                        continue;
 
-            for (int i = 0; i < stack.Count; i++)
-            {
-                int fromY = stack[i].Grid.y;
-                Set(x, i, stack[i]);
-                if (fromY != i)
-                    moved.Add(stack[i]);
+                    if (!cell.CanMoveDown)
+                        break;
+
+                    int fromY = cell.Grid.y;
+                    Set(x, scanY, null);
+                    Set(x, targetY, cell);
+                    if (fromY != targetY)
+                        moved.Add(cell);
+                    break;
+                }
             }
         }
 

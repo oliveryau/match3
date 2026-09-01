@@ -18,7 +18,30 @@ namespace Match3
         public float CellSize = 1f;
         public float SwapDuration = 0.18f;
         public float FailSwapDuration = 0.14f;
-        public float BurstDuration = 0.22f;
+        [Header("Burst Stars")]
+        [FormerlySerializedAs("BurstDuration")]
+        [Tooltip("Burst / shard lifetime for a normal 3-match clear.")]
+        public float BurstDurationMatch3 = 0.22f;
+        [Tooltip("Burst / shard lifetime for a 4+ match clear.")]
+        public float BurstDurationMatch4 = 0.28f;
+        [Tooltip("Burst / shard lifetime for a gold peach detonation.")]
+        public float BurstDurationGoldPeach = 0.35f;
+        [Tooltip("Star shards spawned on a normal 3-match clear.")]
+        public int BurstStarCountMatch3 = 5;
+        [Tooltip("Star shards spawned on a 4+ match clear.")]
+        public int BurstStarCountMatch4 = 10;
+        [Tooltip("Star shards spawned on a gold peach detonation.")]
+        public int BurstStarCountGoldPeach = 16;
+        [Tooltip("Shard size as a fraction of CellSize for a normal 3-match.")]
+        public float BurstStarScaleMatch3 = 0.28f;
+        [Tooltip("Shard size as a fraction of CellSize for a 4+ match.")]
+        public float BurstStarScaleMatch4 = 0.42f;
+        [Tooltip("Shard size as a fraction of CellSize for a gold peach.")]
+        public float BurstStarScaleGoldPeach = 0.5f;
+        [Tooltip("Parent for pooled burst stars. Created under the board if left empty.")]
+        [SerializeField] Transform burstStarPoolRoot;
+        [Tooltip("How many burst stars to pre-create at start.")]
+        [SerializeField] int burstStarPoolPrewarm = 64;
         [Header("Fly To Goal (UI Overlay)")]
         [Tooltip("How long goal-food tiles take to fly into the goal icon.")]
         public float FlyToGoalDuration = 0.4f;
@@ -56,7 +79,37 @@ namespace Match3
         public Sprite Propeller;
         public Sprite PowderKeg;
         public Sprite LightBall;
+        [Tooltip("Obstacle art variants. Counts are balanced evenly when the board is built.")]
+        public Sprite[] ObstacleSprites;
+        [Tooltip("Used when ObstacleSprites is empty.")]
         public Sprite Obstacle;
+        [Header("Match Hint")]
+        [Tooltip("Pulsing circle shown on a potential swap after idle.")]
+        [FormerlySerializedAs("hintCircleSprite")]
+        public Sprite HintCircleSprite;
+        [Tooltip("Seconds without a match before showing a hint on a potential swap.")]
+        [FormerlySerializedAs("hintIdleSeconds")]
+        public float HintIdleSeconds = 3f;
+        [Tooltip("One pulse cycle length in seconds (scale up + fade).")]
+        [FormerlySerializedAs("hintPulseDuration")]
+        public float HintPulseDuration = 1.1f;
+        [Tooltip("Start diameter as a fraction of CellSize.")]
+        [FormerlySerializedAs("hintPulseScaleMin")]
+        public float HintPulseScaleMin = 1.05f;
+        [Tooltip("End diameter as a fraction of CellSize.")]
+        [FormerlySerializedAs("hintPulseScaleMax")]
+        public float HintPulseScaleMax = 1.55f;
+        [Tooltip("Alpha at the start of each pulse.")]
+        [Range(0f, 1f)]
+        public float HintPulseAlphaMax = 1f;
+        [Tooltip("Alpha at the end of each pulse (keep > 0 so the ring stays readable).")]
+        [Range(0f, 1f)]
+        public float HintPulseAlphaMin = 0.15f;
+        [Tooltip("Sorting order above foods (1) / specials (2) / burst stars (6).")]
+        public int HintSortingOrder = 12;
+        [Header("Input")]
+        [Tooltip("How far to drag (screen pixels) before a swap triggers.")]
+        [SerializeField] float swipePixelsToSwap = 32f;
         [SerializeField] Match3LevelVideoPlayer levelVideo;
 
         Match3Engine _engine;
@@ -64,6 +117,9 @@ namespace Match3
         readonly List<Sprite> _runtimeSprites = new List<Sprite>();
         GridPos? _selected;
         GridPos? _pressCell;
+        Vector2? _pressScreen;
+        bool _gestureHandled;
+        int _activePointerId = -2;
         Camera _camera;
         bool _busy;
         int _placedScreenW;
@@ -72,8 +128,21 @@ namespace Match3
         Transform _foodBgRoot;
         RectTransform _flyOverlayRoot;
         Canvas _flyOverlayCanvas;
+        readonly Stack<Transform> _burstStarPool = new Stack<Transform>(128);
+        float _hintIdleElapsed;
+        float _hintPulseElapsed;
+        bool _hintVisible;
+        readonly Transform[] _hintCircles = new Transform[2];
+        readonly SpriteRenderer[] _hintRenderers = new SpriteRenderer[2];
+
+        public static Match3BoardView Instance { get; private set; }
 
         public Match3Engine Engine => _engine;
+
+        void Awake()
+        {
+            Instance = this;
+        }
 
         void Start()
         {
@@ -81,14 +150,21 @@ namespace Match3
             ApplyPendingLevel();
             ApplyMatch3Bgm();
             EnsureFoodSprites();
+            EnsureBurstStarPool();
             _engine = new Match3Engine(Width, Height);
             _engine.NewTileMatchChance = NewTileMatchChance;
             _engine.NewBoard(ColorCount);
+            if (ShouldSpawnVacationEdgeObstacles())
+            {
+                _engine.PlaceEdgeColumnObstacles();
+                AssignEvenObstacleVariants();
+            }
             PlaceBoardAtBottom();
             EnsureBoardBackground();
             EnsureFoodBackgrounds();
             Rebuild();
             SyncHud();
+            EnsureHintCircles();
             // Build overlay early so the first fly-to-goal isn't using an unscaled/zero-size canvas.
             EnsureFlyOverlay();
             Canvas.ForceUpdateCanvases();
@@ -140,6 +216,108 @@ namespace Match3
                 levelVideo.Configure(level);
         }
 
+        static bool ShouldSpawnVacationEdgeObstacles()
+        {
+            var gm = GameManager.Instance;
+            return gm != null
+                   && gm.HasPendingMatch3Level
+                   && gm.ActiveStreetVideoId == HomeVideoId.VacationStreet;
+        }
+
+        void AssignEvenObstacleVariants()
+        {
+            var sprites = ResolvedObstacleSprites();
+            if (sprites.Length == 0 || _engine == null)
+                return;
+
+            var obstacles = new List<Cell>();
+            foreach (var cell in _engine.Board.AllMain())
+            {
+                if (cell.IsObstacle)
+                    obstacles.Add(cell);
+            }
+
+            if (obstacles.Count == 0)
+                return;
+
+            if (sprites.Length == 1)
+            {
+                for (int i = 0; i < obstacles.Count; i++)
+                    obstacles[i].ColorId = 1;
+                return;
+            }
+
+            var bag = BuildEvenVariantBag(obstacles.Count, sprites.Length);
+            ShuffleVariantBag(bag);
+
+            for (int i = 0; i < obstacles.Count; i++)
+                obstacles[i].ColorId = bag[i] + 1;
+        }
+
+        static List<int> BuildEvenVariantBag(int count, int variantCount)
+        {
+            var bag = new List<int>(count);
+            int baseEach = count / variantCount;
+            int remainder = count % variantCount;
+            for (int variant = 0; variant < variantCount; variant++)
+            {
+                int amount = baseEach + (variant < remainder ? 1 : 0);
+                for (int i = 0; i < amount; i++)
+                    bag.Add(variant);
+            }
+
+            return bag;
+        }
+
+        static void ShuffleVariantBag(List<int> bag)
+        {
+            for (int i = bag.Count - 1; i > 0; i--)
+            {
+                int j = UnityEngine.Random.Range(0, i + 1);
+                int tmp = bag[i];
+                bag[i] = bag[j];
+                bag[j] = tmp;
+            }
+        }
+
+        Sprite[] ResolvedObstacleSprites()
+        {
+            if (ObstacleSprites != null && ObstacleSprites.Length > 0)
+            {
+                int count = 0;
+                for (int i = 0; i < ObstacleSprites.Length; i++)
+                {
+                    if (ObstacleSprites[i] != null)
+                        count++;
+                }
+
+                if (count == 0)
+                    return Obstacle != null ? new[] { Obstacle } : new Sprite[0];
+
+                var sprites = new Sprite[count];
+                int write = 0;
+                for (int i = 0; i < ObstacleSprites.Length; i++)
+                {
+                    if (ObstacleSprites[i] != null)
+                        sprites[write++] = ObstacleSprites[i];
+                }
+
+                return sprites;
+            }
+
+            return Obstacle != null ? new[] { Obstacle } : new Sprite[0];
+        }
+
+        Sprite ObstacleSprite(Cell cell)
+        {
+            var sprites = ResolvedObstacleSprites();
+            if (sprites.Length == 0)
+                return FoodSprite(cell.ColorId);
+
+            int index = Mathf.Clamp(cell.ColorId - 1, 0, sprites.Length - 1);
+            return sprites[index];
+        }
+
         void NotifyLevelVideo()
         {
             if (levelVideo == null)
@@ -167,6 +345,9 @@ namespace Match3
 
         void OnDestroy()
         {
+            if (Instance == this)
+                Instance = null;
+
             if (_flyOverlayRoot != null)
                 Destroy(_flyOverlayRoot.gameObject);
 
@@ -179,6 +360,24 @@ namespace Match3
             }
         }
 
+        /// <summary>Screen point at the board grid's center (for star unlock FX).</summary>
+        public bool TryGetBoardCenterScreenPoint(out Vector2 screenPoint)
+        {
+            screenPoint = default;
+            if (_camera == null)
+                _camera = Camera.main;
+            if (_camera == null)
+                return false;
+
+            var local = new Vector3(
+                (Width - 1) * 0.5f * CellSize,
+                (Height - 1) * 0.5f * CellSize,
+                0f);
+            Vector3 world = transform.TransformPoint(local);
+            screenPoint = _camera.WorldToScreenPoint(world);
+            return true;
+        }
+
         void Update()
         {
             if (_engine == null) return;
@@ -187,27 +386,173 @@ namespace Match3
                 PlaceBoardAtBottom();
                 EnsureBoardBackground();
             }
+
+            UpdateMatchHint();
+
             if (_busy) return;
             if (Match3ResultUI.Instance != null && Match3ResultUI.Instance.IsShowing)
                 return;
             if (Match3ScoreUI.Instance != null && !Match3ScoreUI.Instance.HasTurnsLeft)
                 return;
 
-            if (PressedThisFrame())
+            ProcessBoardInput();
+        }
+
+        void ProcessBoardInput()
+        {
+            if (PointerBegan(out Vector2 beganPos))
             {
-                if (TryGridAtPointer(out var cell))
+                if (TryGridAtScreen(beganPos, out var cell) && IsOperableCell(cell))
+                {
                     _pressCell = cell;
+                    _pressScreen = beganPos;
+                    _gestureHandled = false;
+                }
+                else
+                {
+                    ClearPointerGesture();
+                }
+
+                return;
             }
 
-            if (ReleasedThisFrame() && _pressCell.HasValue)
+            if (!_pressCell.HasValue || !_pressScreen.HasValue)
+                return;
+
+            if (!TryGetPointerState(out Vector2 pos, out bool held, out bool ended))
             {
-                if (TryGridAtPointer(out var released) && released.IsNeighbor(_pressCell.Value))
-                    TrySwapCells(_pressCell.Value, released);
-                else if (TryGridAtPointer(out var clicked))
-                    HandleClick(clicked);
-
-                _pressCell = null;
+                ClearPointerGesture();
+                return;
             }
+
+            if (held && !_gestureHandled)
+            {
+                float minSwipe = Mathf.Max(8f, swipePixelsToSwap);
+                Vector2 delta = pos - _pressScreen.Value;
+                if (delta.sqrMagnitude >= minSwipe * minSwipe
+                    && TryGetSwipeNeighbor(_pressCell.Value, delta, out var neighbor))
+                {
+                    TrySwapCells(_pressCell.Value, neighbor);
+                    ClearPointerGesture();
+                    return;
+                }
+            }
+
+            if (!ended)
+                return;
+
+            if (!_gestureHandled && TryGridAtScreen(pos, out var released))
+            {
+                if (released.IsNeighbor(_pressCell.Value))
+                    TrySwapCells(_pressCell.Value, released);
+                else
+                    HandleClick(released);
+            }
+
+            ClearPointerGesture();
+        }
+
+        void ClearPointerGesture()
+        {
+            _pressCell = null;
+            _pressScreen = null;
+            _gestureHandled = false;
+            _activePointerId = -2;
+        }
+
+        bool TryGetSwipeNeighbor(GridPos from, Vector2 screenDelta, out GridPos neighbor)
+        {
+            neighbor = default;
+            if (Mathf.Abs(screenDelta.x) >= Mathf.Abs(screenDelta.y))
+            {
+                neighbor = screenDelta.x >= 0f
+                    ? new GridPos(from.x + 1, from.y)
+                    : new GridPos(from.x - 1, from.y);
+            }
+            else
+            {
+                neighbor = screenDelta.y >= 0f
+                    ? new GridPos(from.x, from.y + 1)
+                    : new GridPos(from.x, from.y - 1);
+            }
+
+            if (neighbor.x < 0 || neighbor.y < 0 || neighbor.x >= Width || neighbor.y >= Height)
+                return false;
+
+            return neighbor.IsNeighbor(from);
+        }
+
+        bool PointerBegan(out Vector2 pos)
+        {
+            pos = default;
+            if (_pressCell.HasValue)
+                return false;
+
+            if (Input.GetMouseButtonDown(0))
+            {
+                _activePointerId = -1;
+                pos = Input.mousePosition;
+                return true;
+            }
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                var touch = Input.GetTouch(i);
+                if (touch.phase != TouchPhase.Began)
+                    continue;
+
+                _activePointerId = touch.fingerId;
+                pos = touch.position;
+                return true;
+            }
+
+            return false;
+        }
+
+        bool TryGetPointerState(out Vector2 pos, out bool held, out bool ended)
+        {
+            pos = default;
+            held = false;
+            ended = false;
+
+            if (_activePointerId < 0)
+            {
+                if (Input.GetMouseButton(0))
+                {
+                    pos = Input.mousePosition;
+                    held = true;
+                    return true;
+                }
+
+                if (Input.GetMouseButtonUp(0))
+                {
+                    pos = Input.mousePosition;
+                    ended = true;
+                    return true;
+                }
+
+                return false;
+            }
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                var touch = Input.GetTouch(i);
+                if (touch.fingerId != _activePointerId)
+                    continue;
+
+                pos = touch.position;
+                if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                {
+                    ended = true;
+                    return true;
+                }
+
+                held = true;
+                return true;
+            }
+
+            ended = true;
+            return true;
         }
 
         public void Swap(Vector2Int a, Vector2Int b)
@@ -221,6 +566,9 @@ namespace Match3
 
         void HandleClick(GridPos cell)
         {
+            if (!IsOperableCell(cell))
+                return;
+
             if (!_selected.HasValue)
             {
                 _selected = cell;
@@ -251,6 +599,8 @@ namespace Match3
         void TrySwapCells(GridPos a, GridPos b)
         {
             if (_busy) return;
+            if (!IsOperableCell(a) || !IsOperableCell(b))
+                return;
             if (Match3ResultUI.Instance != null && Match3ResultUI.Instance.IsShowing)
                 return;
             if (Match3ScoreUI.Instance != null && !Match3ScoreUI.Instance.HasTurnsLeft)
@@ -263,6 +613,7 @@ namespace Match3
             _busy = true;
             _selected = null;
             RefreshSelection();
+            HideMatchHint();
 
             var cellA = _engine.Board.Get(a);
             var cellB = _engine.Board.Get(b);
@@ -291,6 +642,7 @@ namespace Match3
 
             if (cleared.Count > 0)
             {
+                NotifyPlayerMatched();
                 NotifyLevelVideo();
                 PlayMatchClearSfx();
                 ReportCleared(cleared);
@@ -320,11 +672,171 @@ namespace Match3
                 if (matches.Count == 0)
                     yield break;
 
+                NotifyPlayerMatched();
                 ReportCleared(matches);
                 NotifyLevelVideo();
                 PlayMatchClearSfx();
                 yield return BurstCells(matches);
                 SpawnSpecialViews();
+            }
+        }
+
+        void NotifyPlayerMatched()
+        {
+            HideMatchHint();
+            _hintIdleElapsed = 0f;
+        }
+
+        void UpdateMatchHint()
+        {
+            if (_engine == null)
+            {
+                HideMatchHint();
+                return;
+            }
+
+            if (HintCircleSprite == null)
+                HintCircleSprite = BurstSprite;
+
+            bool blocked = _busy
+                || (Match3ResultUI.Instance != null && Match3ResultUI.Instance.IsShowing)
+                || (Match3ScoreUI.Instance != null && !Match3ScoreUI.Instance.HasTurnsLeft);
+
+            if (blocked)
+            {
+                HideMatchHint();
+                return;
+            }
+
+            // Idle = time since last successful match (failed swaps do not reset).
+            _hintIdleElapsed += Time.deltaTime;
+            if (_hintIdleElapsed < Mathf.Max(0.1f, HintIdleSeconds))
+                return;
+
+            if (!_hintVisible)
+                TryShowMatchHint();
+
+            if (_hintVisible)
+                AnimateMatchHintPulse();
+        }
+
+        void TryShowMatchHint()
+        {
+            if (HintCircleSprite == null)
+            {
+                HideMatchHint();
+                return;
+            }
+
+            if (!_engine.TryGetHintSwap(out _, out _, out var highlight))
+            {
+                HideMatchHint();
+                return;
+            }
+
+            EnsureHintCircles();
+            PlaceHintCircle(0, highlight);
+            if (_hintCircles.Length > 1 && _hintCircles[1] != null)
+                _hintCircles[1].gameObject.SetActive(false);
+
+            _hintPulseElapsed = 0f;
+            _hintVisible = true;
+            AnimateMatchHintPulse();
+        }
+
+        void PlaceHintCircle(int index, GridPos grid)
+        {
+            if (index < 0 || index >= _hintCircles.Length || _hintCircles[index] == null)
+                return;
+
+            _hintCircles[index].localPosition = LocalPos(grid);
+            if (_hintRenderers[index] != null)
+            {
+                _hintRenderers[index].sprite = HintCircleSprite;
+                _hintRenderers[index].sortingOrder = HintSortingOrder;
+                var c = Color.white;
+                c.a = HintPulseAlphaMax;
+                _hintRenderers[index].color = c;
+            }
+
+            ApplyHintCircleScale(_hintCircles[index], HintPulseScaleMin);
+            _hintCircles[index].gameObject.SetActive(true);
+        }
+
+        void AnimateMatchHintPulse()
+        {
+            float period = Mathf.Max(0.05f, HintPulseDuration);
+            _hintPulseElapsed += Time.deltaTime;
+            float k = (_hintPulseElapsed % period) / period;
+            float scaleFrac = Mathf.Lerp(HintPulseScaleMin, HintPulseScaleMax, k);
+            float alpha = Mathf.Lerp(HintPulseAlphaMax, HintPulseAlphaMin, k);
+
+            for (int i = 0; i < _hintCircles.Length; i++)
+            {
+                if (_hintCircles[i] == null || !_hintCircles[i].gameObject.activeSelf)
+                    continue;
+                ApplyHintCircleScale(_hintCircles[i], scaleFrac);
+                if (_hintRenderers[i] != null)
+                {
+                    var c = _hintRenderers[i].color;
+                    c.a = alpha;
+                    _hintRenderers[i].color = c;
+                }
+            }
+        }
+
+        void ApplyHintCircleScale(Transform circle, float diameterFrac)
+        {
+            if (circle == null)
+                return;
+
+            float target = CellSize * Mathf.Max(0.01f, diameterFrac);
+            var sr = circle.GetComponent<SpriteRenderer>();
+            var sprite = sr != null && sr.sprite != null ? sr.sprite : HintCircleSprite;
+
+            if (sprite != null)
+            {
+                var size = sprite.bounds.size;
+                float sx = size.x > 0.0001f ? target / size.x : target;
+                float sy = size.y > 0.0001f ? target / size.y : target;
+                circle.localScale = new Vector3(sx, sy, 1f);
+            }
+            else
+            {
+                circle.localScale = Vector3.one * target;
+            }
+        }
+
+        void HideMatchHint()
+        {
+            _hintVisible = false;
+            _hintPulseElapsed = 0f;
+            for (int i = 0; i < _hintCircles.Length; i++)
+            {
+                if (_hintCircles[i] != null)
+                    _hintCircles[i].gameObject.SetActive(false);
+            }
+        }
+
+        void EnsureHintCircles()
+        {
+            for (int i = 0; i < _hintCircles.Length; i++)
+            {
+                if (_hintCircles[i] != null)
+                    continue;
+
+                var go = new GameObject($"Hint Circle {i + 1}");
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = Vector3.zero;
+                go.transform.localRotation = Quaternion.identity;
+                go.transform.localScale = Vector3.one;
+                var sr = go.AddComponent<SpriteRenderer>();
+                sr.sprite = HintCircleSprite;
+                sr.sortingOrder = HintSortingOrder;
+                sr.color = Color.white;
+                go.SetActive(false);
+                _hintCircles[i] = go.transform;
+                _hintRenderers[i] = sr;
             }
         }
 
@@ -422,6 +934,7 @@ namespace Match3
                 ? Match3ScoreUI.Instance.GoalFoodId
                 : -1;
 
+            GetBurstFxParams(out int starCount, out float starScale, out float burstDuration);
             var running = new List<Transform>(cleared.Count);
             bool anyFlyToGoal = false;
 
@@ -436,24 +949,54 @@ namespace Match3
                 if (isGoalFood)
                 {
                     anyFlyToGoal = true;
+                    // Goal foods fly to the HUD instead of bursting, but still spawn stars.
+                    var sr = view.GetComponent<SpriteRenderer>();
+                    SpawnBurstShards(
+                        view.localPosition,
+                        sr != null ? sr.color : Color.white,
+                        starCount,
+                        starScale,
+                        burstDuration);
                     StartCoroutine(FlyToGoalUi(view));
                 }
                 else
                 {
                     running.Add(view);
-                    StartCoroutine(BurstOne(view));
+                    StartCoroutine(BurstOne(view, starCount, starScale, burstDuration));
                 }
             }
 
             float wait = anyFlyToGoal
-                ? Mathf.Max(BurstDuration, FlyToGoalDuration)
-                : BurstDuration;
+                ? Mathf.Max(burstDuration, FlyToGoalDuration)
+                : burstDuration;
             yield return new WaitForSeconds(wait);
 
             for (int i = 0; i < running.Count; i++)
             {
                 if (running[i] != null)
                     Destroy(running[i].gameObject);
+            }
+        }
+
+        void GetBurstFxParams(out int count, out float scaleFrac, out float duration)
+        {
+            if (_engine != null && _engine.LastWasGoldPeachBurst)
+            {
+                count = Mathf.Max(1, BurstStarCountGoldPeach);
+                scaleFrac = BurstStarScaleGoldPeach;
+                duration = Mathf.Max(0.01f, BurstDurationGoldPeach);
+            }
+            else if (_engine != null && _engine.LastMaxMatchRunLength >= 4)
+            {
+                count = Mathf.Max(1, BurstStarCountMatch4);
+                scaleFrac = BurstStarScaleMatch4;
+                duration = Mathf.Max(0.01f, BurstDurationMatch4);
+            }
+            else
+            {
+                count = Mathf.Max(1, BurstStarCountMatch3);
+                scaleFrac = BurstStarScaleMatch3;
+                duration = Mathf.Max(0.01f, BurstDurationMatch3);
             }
         }
 
@@ -585,18 +1128,18 @@ namespace Match3
             return size > 1f ? size : 80f;
         }
 
-        IEnumerator BurstOne(Transform view)
+        IEnumerator BurstOne(Transform view, int starCount, float starScaleFrac, float burstDuration)
         {
             var sr = view.GetComponent<SpriteRenderer>();
             var startScale = view.localScale;
             var startColor = sr != null ? sr.color : Color.white;
-            SpawnBurstShards(view.localPosition, startColor);
+            SpawnBurstShards(view.localPosition, startColor, starCount, starScaleFrac, burstDuration);
 
             float t = 0f;
-            while (t < BurstDuration && view != null)
+            while (t < burstDuration && view != null)
             {
                 t += Time.deltaTime;
-                float k = Mathf.Clamp01(t / BurstDuration);
+                float k = Mathf.Clamp01(t / burstDuration);
                 view.localScale = startScale * Mathf.Lerp(1f, 1.45f, k);
                 if (sr != null)
                 {
@@ -608,37 +1151,62 @@ namespace Match3
             }
         }
 
-        void SpawnBurstShards(Vector3 localPos, Color color)
+        void SpawnBurstShards(
+            Vector3 localPos,
+            Color color,
+            int count,
+            float scaleFrac,
+            float burstDuration)
         {
-            const int count = 5;
+            count = Mathf.Max(1, count);
+            float size = CellSize * Mathf.Max(0.01f, scaleFrac);
+            float travel = CellSize * (scaleFrac >= BurstStarScaleMatch4 ? 1.05f : 0.8f);
             for (int i = 0; i < count; i++)
             {
-                var go = new GameObject("burst");
-                go.transform.SetParent(transform, false);
-                go.transform.localPosition = localPos;
-                go.transform.localScale = Vector3.one * (CellSize * 0.28f);
-                var sr = go.AddComponent<SpriteRenderer>();
-                sr.sprite = BurstSprite != null ? BurstSprite : null;
-                sr.color = color;
-                sr.sortingOrder = 6;
+                var shard = RentBurstStar();
+                if (shard == null)
+                    continue;
+
+                shard.SetParent(burstStarPoolRoot != null ? burstStarPoolRoot : transform, false);
+                shard.localPosition = localPos;
+                shard.localScale = Vector3.one * size;
+                shard.gameObject.SetActive(true);
+
+                var sr = shard.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.sprite = BurstSprite != null ? BurstSprite : null;
+                    sr.color = color;
+                    sr.sortingOrder = 6;
+                }
+
                 float angle = (i / (float)count) * Mathf.PI * 2f + Random.Range(-0.2f, 0.2f);
                 var dir = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f);
-                StartCoroutine(FlyShard(go.transform, sr, dir * (CellSize * Random.Range(0.45f, 0.8f))));
+                StartCoroutine(FlyShard(
+                    shard,
+                    sr,
+                    dir * (travel * Random.Range(0.55f, 1f)),
+                    size,
+                    burstDuration));
             }
         }
 
-        IEnumerator FlyShard(Transform shard, SpriteRenderer sr, Vector3 delta)
+        IEnumerator FlyShard(
+            Transform shard,
+            SpriteRenderer sr,
+            Vector3 delta,
+            float startSize,
+            float burstDuration)
         {
             var from = shard.localPosition;
             var to = from + delta;
             float t = 0f;
-            float duration = BurstDuration;
-            while (t < duration && shard != null)
+            while (t < burstDuration && shard != null)
             {
                 t += Time.deltaTime;
-                float k = Mathf.Clamp01(t / duration);
+                float k = Mathf.Clamp01(t / burstDuration);
                 shard.localPosition = Vector3.Lerp(from, to, k);
-                shard.localScale = Vector3.one * (CellSize * 0.28f * (1f - k));
+                shard.localScale = Vector3.one * (startSize * (1f - k));
                 if (sr != null)
                 {
                     var c = sr.color;
@@ -647,8 +1215,74 @@ namespace Match3
                 }
                 yield return null;
             }
-            if (shard != null)
-                Destroy(shard.gameObject);
+
+            ReturnBurstStar(shard);
+        }
+
+        void EnsureBurstStarPool()
+        {
+            if (burstStarPoolRoot == null)
+            {
+                var existing = transform.Find("Burst Stars Pool");
+                if (existing != null)
+                    burstStarPoolRoot = existing;
+                else
+                {
+                    var go = new GameObject("Burst Stars Pool");
+                    go.transform.SetParent(transform, false);
+                    go.transform.localPosition = Vector3.zero;
+                    go.transform.localRotation = Quaternion.identity;
+                    go.transform.localScale = Vector3.one;
+                    burstStarPoolRoot = go.transform;
+                }
+            }
+
+            int prewarm = Mathf.Max(0, burstStarPoolPrewarm);
+            while (_burstStarPool.Count < prewarm)
+                _burstStarPool.Push(CreateBurstStar());
+        }
+
+        Transform CreateBurstStar()
+        {
+            var go = new GameObject("Burst Star");
+            go.transform.SetParent(burstStarPoolRoot != null ? burstStarPoolRoot : transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localScale = Vector3.one;
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = BurstSprite;
+            sr.sortingOrder = 6;
+            go.SetActive(false);
+            return go.transform;
+        }
+
+        Transform RentBurstStar()
+        {
+            if (_burstStarPool.Count == 0)
+                return CreateBurstStar();
+
+            var shard = _burstStarPool.Pop();
+            if (shard == null)
+                return CreateBurstStar();
+            return shard;
+        }
+
+        void ReturnBurstStar(Transform shard)
+        {
+            if (shard == null)
+                return;
+
+            shard.gameObject.SetActive(false);
+            shard.SetParent(burstStarPoolRoot != null ? burstStarPoolRoot : transform, false);
+            shard.localPosition = Vector3.zero;
+            shard.localScale = Vector3.one;
+            var sr = shard.GetComponent<SpriteRenderer>();
+            if (sr != null)
+            {
+                var c = sr.color;
+                c.a = 1f;
+                sr.color = c;
+            }
+            _burstStarPool.Push(shard);
         }
 
         IEnumerator AnimateDrop(List<Cell> moved, List<Cell> spawned)
@@ -741,9 +1375,11 @@ namespace Match3
 
         Transform SpawnView(Cell cell, Vector3 localPos)
         {
-            var go = new GameObject(cell.IsSpecial
-                ? $"special_{cell.Special}_{cell.Grid.x}_{cell.Grid.y}"
-                : $"cell_{cell.Grid.x}_{cell.Grid.y}");
+            var go = new GameObject(cell.IsObstacle
+                ? $"obstacle_{cell.Grid.x}_{cell.Grid.y}"
+                : cell.IsSpecial
+                    ? $"special_{cell.Special}_{cell.Grid.x}_{cell.Grid.y}"
+                    : $"cell_{cell.Grid.x}_{cell.Grid.y}");
             go.transform.SetParent(transform, false);
             go.transform.localPosition = localPos;
             go.transform.localScale = Vector3.one * (CellSize * 0.92f);
@@ -792,7 +1428,7 @@ namespace Match3
 
         Sprite SpriteOf(Cell cell)
         {
-            if (cell.IsObstacle) return Obstacle != null ? Obstacle : FoodSprite(cell.ColorId);
+            if (cell.IsObstacle) return ObstacleSprite(cell);
             switch (cell.Special)
             {
                 case SpecialType.HMissile:
@@ -972,13 +1608,19 @@ namespace Match3
             }
         }
 
-        bool TryGridAtPointer(out GridPos grid)
+        bool IsOperableCell(GridPos grid)
+        {
+            if (_engine == null) return false;
+            var cell = _engine.Board.Get(grid);
+            return cell != null && cell.CanOperate;
+        }
+
+        bool TryGridAtScreen(Vector2 screen, out GridPos grid)
         {
             grid = default;
             if (_camera == null) _camera = Camera.main;
             if (_camera == null) return false;
 
-            Vector3 screen = PointerScreen();
             var ray = _camera.ScreenPointToRay(screen);
             var plane = new Plane(Vector3.forward, transform.position);
             if (!plane.Raycast(ray, out float enter)) return false;
@@ -989,25 +1631,6 @@ namespace Match3
             if (x < 0 || y < 0 || x >= Width || y >= Height) return false;
             grid = new GridPos(x, y);
             return true;
-        }
-
-        static Vector3 PointerScreen()
-        {
-            if (Input.touchCount > 0)
-                return Input.GetTouch(0).position;
-            return Input.mousePosition;
-        }
-
-        static bool PressedThisFrame()
-        {
-            if (Input.GetMouseButtonDown(0)) return true;
-            return Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began;
-        }
-
-        static bool ReleasedThisFrame()
-        {
-            if (Input.GetMouseButtonUp(0)) return true;
-            return Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Ended;
         }
     }
 }

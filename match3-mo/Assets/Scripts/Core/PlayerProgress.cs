@@ -20,6 +20,7 @@ namespace Match3
         public bool friendsPhotoUnlocked;
         public bool moneyPlantUnlocked;
         public bool homeDragIntroCompleted;
+        public bool homeIntroWatched;
         public bool achievement1Watched;
         public bool achievement2Watched;
     }
@@ -46,6 +47,7 @@ namespace Match3
         static bool _friendsPhotoUnlocked;
         static bool _moneyPlantUnlocked;
         static bool _homeDragIntroCompleted;
+        static bool _homeIntroWatched;
         static bool _achievement1Watched;
         static bool _achievement2Watched;
 
@@ -63,6 +65,7 @@ namespace Match3
             _friendsPhotoUnlocked = false;
             _moneyPlantUnlocked = false;
             _homeDragIntroCompleted = false;
+            _homeIntroWatched = false;
             _achievement1Watched = false;
             _achievement2Watched = false;
             RegisterPlayerName(playerName);
@@ -96,6 +99,7 @@ namespace Match3
                 _friendsPhotoUnlocked = data.friendsPhotoUnlocked;
                 _moneyPlantUnlocked = data.moneyPlantUnlocked;
                 _homeDragIntroCompleted = data.homeDragIntroCompleted;
+                _homeIntroWatched = data.homeIntroWatched;
                 _achievement1Watched = data.achievement1Watched;
                 _achievement2Watched = data.achievement2Watched;
                 // Existing saves from before this flag: skip intro if they already played.
@@ -107,6 +111,18 @@ namespace Match3
                         || data.phoneNotificationDismissed))
                 {
                     _homeDragIntroCompleted = true;
+                }
+
+                // Existing saves from before Micro7 intro: skip if they already started playing.
+                if (!_homeIntroWatched
+                    && (_homeDragIntroCompleted
+                        || (data.keys != null && data.keys.Count > 0)
+                        || data.suzhouFanUnlocked
+                        || data.friendsPhotoUnlocked
+                        || data.moneyPlantUnlocked
+                        || data.phoneNotificationDismissed))
+                {
+                    _homeIntroWatched = true;
                 }
                 SyncPhotoCollectibleUnlocks(saveIfChanged: true);
             }
@@ -124,6 +140,17 @@ namespace Match3
             if (string.IsNullOrEmpty(levelKey))
                 return 0;
             return LevelStars.TryGetValue(levelKey, out int stars) ? stars : 0;
+        }
+
+        /// <summary>True once the player has finished this level at least once (any star count).</summary>
+        public static bool HasPlayedLevel(HomeVideoId videoId, StreetMatch3Slot slot) =>
+            HasPlayedLevel(LevelKey(videoId, slot));
+
+        public static bool HasPlayedLevel(string levelKey)
+        {
+            if (string.IsNullOrEmpty(levelKey))
+                return false;
+            return LevelStars.ContainsKey(levelKey);
         }
 
         /// <summary>Sum of best stars across all levels for the loaded player.</summary>
@@ -154,6 +181,17 @@ namespace Match3
                 return;
             _homeDragIntroCompleted = true;
             Save();
+        }
+
+        public static bool HasWatchedHomeIntro() => _homeIntroWatched;
+
+        public static void MarkHomeIntroWatched()
+        {
+            if (_homeIntroWatched)
+                return;
+            _homeIntroWatched = true;
+            if (!string.IsNullOrEmpty(_playerKey))
+                Save();
         }
 
         public static bool HasWatchedAchievement1() => _achievement1Watched;
@@ -247,18 +285,32 @@ namespace Match3
                 Save();
         }
 
-        /// <summary>Keeps the best star count for this level.</summary>
+        /// <summary>Keeps the best star count for this level. Always marks the level as played.</summary>
         public static void RecordStars(string levelKey, int stars)
         {
             if (string.IsNullOrEmpty(levelKey) || string.IsNullOrEmpty(_playerKey))
                 return;
 
             stars = Mathf.Clamp(stars, 0, 3);
-            if (LevelStars.TryGetValue(levelKey, out int existing) && existing >= stars)
-                return;
+            if (LevelStars.TryGetValue(levelKey, out int existing))
+            {
+                if (existing >= stars)
+                    return;
+            }
 
             LevelStars[levelKey] = stars;
             SyncPhotoCollectibleUnlocks(saveIfChanged: false);
+            Save();
+        }
+
+        /// <summary>Marks a level as played without changing a better existing star count.</summary>
+        public static void MarkLevelPlayed(string levelKey)
+        {
+            if (string.IsNullOrEmpty(levelKey) || string.IsNullOrEmpty(_playerKey))
+                return;
+            if (LevelStars.ContainsKey(levelKey))
+                return;
+            LevelStars[levelKey] = 0;
             Save();
         }
 
@@ -333,6 +385,7 @@ namespace Match3
                 _friendsPhotoUnlocked = false;
                 _moneyPlantUnlocked = false;
                 _homeDragIntroCompleted = false;
+                _homeIntroWatched = false;
                 _achievement1Watched = false;
                 _achievement2Watched = false;
                 _playerKey = string.Empty;
@@ -359,6 +412,7 @@ namespace Match3
             _friendsPhotoUnlocked = false;
             _moneyPlantUnlocked = false;
             _homeDragIntroCompleted = false;
+            _homeIntroWatched = false;
             _achievement1Watched = false;
             _achievement2Watched = false;
             _playerKey = string.Empty;
@@ -377,6 +431,7 @@ namespace Match3
                 friendsPhotoUnlocked = _friendsPhotoUnlocked,
                 moneyPlantUnlocked = _moneyPlantUnlocked,
                 homeDragIntroCompleted = _homeDragIntroCompleted,
+                homeIntroWatched = _homeIntroWatched,
                 achievement1Watched = _achievement1Watched,
                 achievement2Watched = _achievement2Watched
             };

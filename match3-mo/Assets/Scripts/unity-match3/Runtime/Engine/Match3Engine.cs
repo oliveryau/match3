@@ -77,6 +77,25 @@ namespace Match3
             State = PlayState.WaitOperate;
         }
 
+        /// <summary>Replaces the leftmost and rightmost columns with fixed obstacles.</summary>
+        public void PlaceEdgeColumnObstacles(ObjectType type = ObjectType.Box)
+        {
+            if (Board.Width < 3)
+                return;
+
+            int right = Board.Width - 1;
+            for (int y = 0; y < Board.Height; y++)
+            {
+                PlaceObstacle(0, y, type);
+                PlaceObstacle(right, y, type);
+            }
+        }
+
+        void PlaceObstacle(int x, int y, ObjectType type)
+        {
+            Board.Set(x, y, Cell.CreateObstacle(type, new GridPos(x, y)));
+        }
+
         public List<Cell> LastSpawnedSpecials { get; private set; } = new List<Cell>();
         public GridPos? PreferredSpecialSpawn { get; set; }
         /// <summary>Longest same-color run in the last clear (0 if peach-only / none).</summary>
@@ -95,6 +114,11 @@ namespace Match3
             cleared = new List<Cell>();
             if (State != PlayState.WaitOperate) return false;
             if (!a.IsNeighbor(b)) return false;
+
+            var ca = Board.Get(a);
+            var cb = Board.Get(b);
+            if (ca == null || cb == null || !ca.CanOperate || !cb.CanOperate)
+                return false;
 
             Board.Swap(a, b);
             var atA = Board.Get(a);
@@ -207,6 +231,8 @@ namespace Match3
             foreach (var cell in cleared)
                 Board.Clear(cell.Grid.x, cell.Grid.y);
 
+            cleared.AddRange(DamageAdjacentObstacles(cleared));
+
             foreach (var kv in spawnByGrid)
             {
                 var spawn = kv.Value;
@@ -219,6 +245,39 @@ namespace Match3
 
             IdleAll();
             return cleared;
+        }
+
+        /// <summary>Obstacles adjacent to cleared tiles lose HP and are removed at 0.</summary>
+        List<Cell> DamageAdjacentObstacles(IReadOnlyList<Cell> clearedTiles)
+        {
+            var destroyed = new List<Cell>();
+            var damaged = new HashSet<Cell>();
+
+            for (int i = 0; i < clearedTiles.Count; i++)
+            {
+                var cleared = clearedTiles[i];
+                if (cleared == null)
+                    continue;
+
+                foreach (var neighbor in ShapeTable.Neighbors4(cleared.Grid))
+                {
+                    var obstacle = Board.Get(neighbor);
+                    if (obstacle == null || !obstacle.IsObstacle || !obstacle.CanCleanUpByRoundItem)
+                        continue;
+                    if (!damaged.Add(obstacle))
+                        continue;
+
+                    obstacle.Hp--;
+                    if (obstacle.Hp > 0)
+                        continue;
+
+                    obstacle.State = CellState.Destroy;
+                    Board.Clear(neighbor.x, neighbor.y);
+                    destroyed.Add(obstacle);
+                }
+            }
+
+            return destroyed;
         }
 
         void CollectLineMatches(
@@ -302,30 +361,106 @@ namespace Match3
 
         bool HasPossibleMove()
         {
+            return TryGetHintSwap(out _, out _, out _);
+        }
+
+        /// <summary>First legal swap that creates a match (or involves a gold peach).</summary>
+        public bool TryGetHintSwap(out GridPos a, out GridPos b)
+        {
+            return TryGetHintSwap(out a, out b, out _);
+        }
+
+        /// <summary>
+        /// First legal swap, plus the pre-swap grid to highlight: the tile that
+        /// ends up inside the resulting match (not the tile swapped out of it).
+        /// </summary>
+        public bool TryGetHintSwap(out GridPos a, out GridPos b, out GridPos highlight)
+        {
+            a = default;
+            b = default;
+            highlight = default;
             for (int x = 0; x < Board.Width; x++)
             for (int y = 0; y < Board.Height; y++)
             {
                 var here = Board.Get(x, y);
-                if (here == null) continue;
-                if (x + 1 < Board.Width && SwapWouldMatch(new GridPos(x, y), new GridPos(x + 1, y)))
-                    return true;
-                if (y + 1 < Board.Height && SwapWouldMatch(new GridPos(x, y), new GridPos(x, y + 1)))
-                    return true;
+                if (here == null || !here.CanOperate) continue;
+
+                if (x + 1 < Board.Width)
+                {
+                    var right = new GridPos(x + 1, y);
+                    if (TryDescribeHintSwap(new GridPos(x, y), right, out highlight))
+                    {
+                        a = new GridPos(x, y);
+                        b = right;
+                        return true;
+                    }
+                }
+
+                if (y + 1 < Board.Height)
+                {
+                    var up = new GridPos(x, y + 1);
+                    if (TryDescribeHintSwap(new GridPos(x, y), up, out highlight))
+                    {
+                        a = new GridPos(x, y);
+                        b = up;
+                        return true;
+                    }
+                }
             }
             return false;
         }
 
         bool SwapWouldMatch(GridPos a, GridPos b)
         {
+            return TryDescribeHintSwap(a, b, out _);
+        }
+
+        /// <summary>
+        /// Returns true if swapping a↔b matches. <paramref name="highlight"/> is the
+        /// pre-swap position of a tile that belongs to the match after the swap.
+        /// </summary>
+        bool TryDescribeHintSwap(GridPos a, GridPos b, out GridPos highlight)
+        {
+            highlight = a;
             var ca = Board.Get(a);
             var cb = Board.Get(b);
+            if (ca == null || cb == null)
+                return false;
+
             if (IsGoldPeach(ca) || IsGoldPeach(cb))
+            {
+                // Prefer highlighting the gold peach itself.
+                highlight = IsGoldPeach(ca) ? a : b;
                 return true;
+            }
 
             Board.Swap(a, b);
-            bool match = Board.FindColorMatches().Count > 0;
+            var matched = Board.FindColorMatches();
+            bool ok = matched.Count > 0;
+            if (ok)
+            {
+                // After swap, the piece that started at `a` sits at `b`, and vice versa.
+                // Highlight the pre-swap seat of whichever piece is in the match.
+                var movedFromA = Board.Get(b);
+                var movedFromB = Board.Get(a);
+                if (matched.Contains(movedFromA) && !matched.Contains(movedFromB))
+                    highlight = a;
+                else if (matched.Contains(movedFromB) && !matched.Contains(movedFromA))
+                    highlight = b;
+                else if (matched.Contains(movedFromA))
+                    highlight = a;
+                else if (matched.Contains(movedFromB))
+                    highlight = b;
+                else
+                {
+                    // Match elsewhere (rare); fall back to a matched cell's grid.
+                    highlight = matched[0].Grid.Equals(a) || matched[0].Grid.Equals(b)
+                        ? matched[0].Grid
+                        : a;
+                }
+            }
             Board.Swap(a, b);
-            return match;
+            return ok;
         }
 
         void IdleAll()
